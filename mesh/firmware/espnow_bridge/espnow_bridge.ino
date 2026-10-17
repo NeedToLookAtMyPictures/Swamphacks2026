@@ -50,6 +50,9 @@ struct __attribute__((packed)) Status {
 
 static QueueHandle_t rxQueue;
 static volatile uint32_t partner = 0;  // 0 = accept everyone
+// Set when someone types a text command (e.g. in a serial monitor); cleared by
+// the next binary command from Python. Controls how logs and RX frames are printed.
+static bool textMode = false;
 static Status status = {};
 static volatile uint32_t rxCount = 0, rxFiltered = 0, rxDropped = 0;  // written in the Wi-Fi task
 
@@ -75,6 +78,7 @@ static void logHost(const char *fmt, ...) {
   va_start(ap, fmt);
   int n = vsnprintf(buf, sizeof(buf), fmt, ap);
   va_end(ap);
+  if (textMode) { Serial.printf("LOG %s\r\n", buf); return; }
   sendToHost(EVT_LOG, (const uint8_t *)buf, n < 0 ? 0 : min((size_t)n, sizeof(buf) - 1));
 }
 
@@ -181,11 +185,54 @@ static void sendInfo() {
   sendToHost(EVT_INFO, mac, 6, (const uint8_t *)&status, sizeof(status));
 }
 
+// ---- text commands (for a human at a serial monitor) ----------------------
+//
+// Type a line ending in Enter. Python's binary messages always start with 0xC0,
+// which never appears in typed text, so the two never get confused.
+
+static void printMac(const uint8_t *mac) {
+  Serial.printf("%02x:%02x:%02x:%02x:%02x:%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+}
+
+static void handleText(char *line) {
+  if (strcmp(line, "HELP") == 0) {
+    Serial.println("commands: ID, STATUS, ON, OFF, TX <text>, HELP");
+  } else if (strcmp(line, "ID") == 0) {
+    uint8_t mac[6];
+    esp_read_mac(mac, ESP_MAC_WIFI_STA);
+    Serial.print("OK espnow_bridge mac=");
+    printMac(mac);
+    Serial.printf(" radio=%s channel=%u\r\n", status.radioOn ? "on" : "off", CHANNEL);
+  } else if (strcmp(line, "STATUS") == 0) {
+    Serial.printf("OK radio=%s partner=%lu sent=%lu send_errors=%lu received=%lu filtered=%lu dropped=%lu "
+                  "last_error=%s\r\n",
+                  status.radioOn ? "on" : "off", (unsigned long)partner, (unsigned long)status.txOk,
+                  (unsigned long)status.txErr, (unsigned long)rxCount, (unsigned long)rxFiltered,
+                  (unsigned long)rxDropped, status.lastErr ? esp_err_to_name(status.lastErr) : "none");
+  } else if (strcmp(line, "ON") == 0) {
+    Serial.println(radioStart() ? "OK radio on" : "ERR radio start failed (see LOG line)");
+  } else if (strcmp(line, "OFF") == 0) {
+    radioStop();
+    Serial.println("OK radio off");
+  } else if (strncmp(line, "TX ", 3) == 0) {
+    // Raw broadcast, like esp-now-modem. The other board prints it if it is also in text mode.
+    if (!status.radioOn) { Serial.println("ERR radio off (send ON first)"); return; }
+    uint32_t before = status.txErr;
+    radioSend(BROADCAST, (const uint8_t *)line + 3, strlen(line + 3));
+    Serial.println(status.txErr == before ? "OK sent" : "ERR send failed (see LOG line)");
+  } else if (line[0] != '\0') {
+    Serial.println("ERR unknown command (try HELP)");
+  }
+}
+
 // ---- host commands --------------------------------------------------------
 
 static uint8_t cmdBuf[1 + 6 + MAX_PAYLOAD + 8];
 static size_t cmdLen = 0;
 static bool cmdEsc = false, cmdOverflow = false;
+static bool inFrame = false;  // between a binary message's opening and closing 0xC0
+static char textBuf[MAX_PAYLOAD + 8];
+static size_t textLen = 0;
 
 static void handleCommand(const uint8_t *m, size_t n) {
   if (n == 0) return;
@@ -206,11 +253,36 @@ static void handleCommand(const uint8_t *m, size_t n) {
 }
 
 static void readHost() {
+  static uint32_t lastByteMs = 0;
   while (Serial.available()) {
     uint8_t b = Serial.read();
+    // Python writes each binary message in one go, so a long pause mid-message means
+    // it was abandoned (host killed). Drop it so typed text works again.
+    if (inFrame && millis() - lastByteMs > 500) { inFrame = false; cmdLen = 0; cmdEsc = false; }
+    lastByteMs = millis();
     if (b == SLIP_END) {
-      if (!cmdOverflow) handleCommand(cmdBuf, cmdLen);
+      if (cmdLen > 0) {  // closing 0xC0 of a binary message
+        textMode = false;
+        if (!cmdOverflow) handleCommand(cmdBuf, cmdLen);
+        inFrame = false;
+      } else {  // opening 0xC0 (or an empty message)
+        inFrame = true;
+        textLen = 0;
+      }
       cmdLen = 0; cmdEsc = false; cmdOverflow = false;
+      continue;
+    }
+    if (!inFrame) {  // typed text: collect a line
+      if (b == '\r' || b == '\n') {
+        if (textLen > 0) {
+          textBuf[textLen] = '\0';
+          textMode = true;
+          handleText(textBuf);
+          textLen = 0;
+        }
+      } else if (textLen < sizeof(textBuf) - 1) {
+        textBuf[textLen++] = (char)b;
+      }
       continue;
     }
     if (cmdEsc) { b = (b == SLIP_ESC_END) ? SLIP_END : (b == SLIP_ESC_ESC) ? SLIP_ESC : b; cmdEsc = false; }
@@ -232,6 +304,14 @@ void loop() {
   readHost();
   RxItem item;
   while (xQueueReceive(rxQueue, &item, 0) == pdTRUE) {
+    if (textMode) {  // human-readable, like esp-now-modem
+      Serial.print("RX ");
+      printMac(item.mac);
+      Serial.printf(" %d ", item.rssi);
+      for (uint8_t i = 0; i < item.len; i++) Serial.write(isprint(item.data[i]) ? item.data[i] : '.');
+      Serial.println();
+      continue;
+    }
     uint8_t head[7];
     memcpy(head, item.mac, 6);
     head[6] = (uint8_t)item.rssi;
