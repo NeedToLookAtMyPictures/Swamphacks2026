@@ -224,3 +224,21 @@ document.getElementById("compose").addEventListener("submit", async (e) => {
     status.textContent = (await res.json()).error;
   }
 });
+
+// Hide/show the chats sidebar (handy on narrow phone screens); remembered per browser
+const CHATS_HIDDEN_KEY = "chatsHidden";
+
+function setChatsHidden(hidden) {
+  document.getElementById("chat-sidebar").hidden = hidden;
+  const toggle = document.getElementById("chat-sidebar-toggle");
+  toggle.setAttribute("aria-expanded", String(!hidden));
+  toggle.title = toggle.ariaLabel = hidden ? "Show chats" : "Hide chats";
+  try { localStorage.setItem(CHATS_HIDDEN_KEY, hidden ? "1" : ""); } catch {}
+}
+
+document.getElementById("chat-sidebar-toggle").addEventListener("click", () =>
+  setChatsHidden(!document.getElementById("chat-sidebar").hidden));
+
+setChatsHidden((() => {
+  try { return localStorage.getItem(CHATS_HIDDEN_KEY) === "1"; } catch { return false; }
+})());

@@ -130,6 +130,8 @@ main {
   border-right: 1px solid #ddd;
 }
 
+#chat-sidebar[hidden] { display: none; }
+
 #new-chat {
   display: flex;
   flex-wrap: wrap;
@@ -208,12 +210,25 @@ main {
   flex-direction: column;
 }
 
-#chat-title {
+#chat-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   padding: 10px 16px;
-  font-weight: 600;
   background: #fff;
   border-bottom: 1px solid #ddd;
 }
+
+#chat-sidebar-toggle {
+  padding: 2px 8px;
+  border: 1px solid #bbb;
+  border-radius: 4px;
+  background: #fff;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+#chat-title { font-weight: 600; }
 
 #message-list {
   flex: 1;
