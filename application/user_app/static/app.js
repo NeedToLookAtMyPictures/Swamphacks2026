@@ -32,8 +32,11 @@ function showTab(name) {
     if (!map) initMap();
     map.invalidateSize();  // Leaflet needs this after the container becomes visible
   }
+  if (name === "messages") loadMessages();
   if (name === "debug") loadDebug();
 }
 
 document.querySelectorAll(".tab").forEach((t) =>
   t.addEventListener("click", () => showTab(t.dataset.tab)));
+
+loadMessages();  // Messages is the tab shown on load

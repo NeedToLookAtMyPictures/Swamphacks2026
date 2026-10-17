@@ -6,9 +6,13 @@ never shared (device_info).
 
 Shared records are identified by (origin_id, seq): origin_id is the device that
 created the record and seq is that device's next sequence number at the time.
+
+People are identified by their name, which is unique and immutable. Messages
+are addressed to a name, so they reach that person on whatever device they use.
 """
 
 import contextlib
+import re
 import secrets
 import sqlite3
 import time
@@ -18,6 +22,10 @@ DEFAULT_DB_PATH = Path(__file__).resolve().parent / "data" / "user.db"
 
 MESSAGE_TTL = 2_678_400    # 31 days, in seconds
 TOMBSTONE_TTL = 2_678_400  # 31 days, in seconds
+SCHEMA_VERSION = 2
+
+# Names are people's addresses: short (they go over LoRa) and compared ignoring case
+NAME_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS locales (
@@ -26,7 +34,7 @@ CREATE TABLE IF NOT EXISTS locales (
     time_created  REAL    NOT NULL,
     location      TEXT    NOT NULL,  -- ID of the location
     name          TEXT    NOT NULL,  -- name of the location
-    sender        TEXT    NOT NULL,  -- user_id
+    sender        TEXT    NOT NULL COLLATE NOCASE,  -- name
     comment       TEXT    NOT NULL DEFAULT '',
     time_received REAL    NOT NULL,
     PRIMARY KEY (origin_id, seq)
@@ -36,8 +44,8 @@ CREATE TABLE IF NOT EXISTS messages (
     origin_id     TEXT    NOT NULL,
     seq           INTEGER NOT NULL,
     time_created  REAL    NOT NULL,
-    sender        TEXT    NOT NULL,  -- user_id
-    receiver      TEXT    NOT NULL,  -- user_id
+    sender        TEXT    NOT NULL COLLATE NOCASE,  -- name
+    receiver      TEXT    NOT NULL COLLATE NOCASE,  -- name
     content       TEXT    NOT NULL,
     is_dead       INTEGER NOT NULL DEFAULT 0,  -- set by age or by a tombstone
     time_received REAL    NOT NULL,
@@ -47,7 +55,7 @@ CREATE TABLE IF NOT EXISTS messages (
 -- One row per user: only the most recent position is kept.
 -- origin_id is the device that reported it, used to break ties.
 CREATE TABLE IF NOT EXISTS geolocations (
-    user          TEXT    PRIMARY KEY,
+    user          TEXT    PRIMARY KEY COLLATE NOCASE,  -- name
     origin_id     TEXT    NOT NULL,
     time_created  REAL    NOT NULL,
     latitude      REAL    NOT NULL,
@@ -70,21 +78,19 @@ CREATE TABLE IF NOT EXISTS tombstones (
 CREATE TABLE IF NOT EXISTS device_info (
     id               INTEGER PRIMARY KEY CHECK (id = 1),
     device_id        TEXT    NOT NULL,  -- immutable, used as origin_id
-    user_id          TEXT    NOT NULL,  -- immutable, used for messages
-    name             TEXT    NOT NULL,  -- immutable display name
+    name             TEXT    NOT NULL COLLATE NOCASE,  -- immutable, unique: the user's address
     next_seq         INTEGER NOT NULL DEFAULT 1,
     time_created     REAL    NOT NULL,
     last_server_sync REAL               -- NULL until the first server sync
 );
 
 CREATE TRIGGER IF NOT EXISTS device_info_immutable
-BEFORE UPDATE OF device_id, user_id, name, time_created ON device_info
+BEFORE UPDATE OF device_id, name, time_created ON device_info
 WHEN NEW.device_id IS NOT OLD.device_id
-  OR NEW.user_id IS NOT OLD.user_id
   OR NEW.name IS NOT OLD.name
   OR NEW.time_created IS NOT OLD.time_created
 BEGIN
-    SELECT RAISE(ABORT, 'device_id, user_id, name and time_created are immutable');
+    SELECT RAISE(ABORT, 'device_id, name and time_created are immutable');
 END;
 
 CREATE TRIGGER IF NOT EXISTS device_info_seq_only_increases
@@ -114,12 +120,23 @@ class DeviceNotInitialized(Exception):
     pass
 
 
+def check_name(name):
+    if not isinstance(name, str) or not NAME_PATTERN.match(name):
+        raise ValueError("names are 1-32 letters, digits, '_' or '-'")
+    return name
+
+
 class Database:
     def __init__(self, path=DEFAULT_DB_PATH):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as conn:
+            version = conn.execute("PRAGMA user_version").fetchone()[0]
+            has_tables = conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table'").fetchone()
+            if has_tables and version != SCHEMA_VERSION:
+                raise RuntimeError(f"{self.path} uses an old schema; delete it and restart")
             conn.executescript(SCHEMA)
+            conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @contextlib.contextmanager
     def _connect(self):
@@ -143,14 +160,19 @@ class Database:
         del device["id"]
         return device
 
-    def init_device(self, name, user_id=None, device_id=None):
-        """Create this device's identity. Fails if it already exists."""
+    def init_device(self, name, device_id=None):
+        """Create this device's identity. Fails if it already exists.
+
+        Names must be unique between people. That can only be guaranteed by the
+        server at setup; offline we can only refuse names we've already seen.
+        """
+        check_name(name)
+        if any(c["name"].lower() == name.lower() for c in self.contacts()):
+            raise ValueError(f"the name {name!r} is already taken")
         with self._connect() as conn:
             conn.execute(
-                "INSERT INTO device_info (id, device_id, user_id, name, time_created) "
-                "VALUES (1, ?, ?, ?, ?)",
-                (device_id or secrets.token_hex(4), user_id or secrets.token_hex(4),
-                 name, time.time()),
+                "INSERT INTO device_info (id, device_id, name, time_created) VALUES (1, ?, ?, ?)",
+                (device_id or secrets.token_hex(4), name, time.time()),
             )
         return self.get_device()
 
@@ -173,28 +195,35 @@ class Database:
         """Atomically reserve this device's next sequence number."""
         row = conn.execute(
             "UPDATE device_info SET next_seq = next_seq + 1 WHERE id = 1 "
-            "RETURNING device_id, user_id, next_seq - 1 AS seq"
+            "RETURNING device_id, name, next_seq - 1 AS seq"
         ).fetchone()
         if row is None:
             raise DeviceNotInitialized()
-        return row["device_id"], row["user_id"], row["seq"]
+        return row["device_id"], row["name"], row["seq"]
 
     # -- creating local records ------------------------------------------------
 
     def add_locale(self, location, name, comment=""):
         now = time.time()
         with self._connect() as conn:
-            origin_id, user_id, seq = self._take_seq(conn)
+            origin_id, me, seq = self._take_seq(conn)
             record = dict(origin_id=origin_id, seq=seq, time_created=now, location=location,
-                          name=name, sender=user_id, comment=comment, time_received=now)
+                          name=name, sender=me, comment=comment, time_received=now)
             self._insert(conn, "locales", record)
         return record
 
     def add_message(self, receiver, content):
+        """Send a message to a name: someone from contacts(), or any name at all.
+
+        It travels through the network until the device with that name sees it.
+        """
+        check_name(receiver)
         now = time.time()
         with self._connect() as conn:
-            origin_id, user_id, seq = self._take_seq(conn)
-            record = dict(origin_id=origin_id, seq=seq, time_created=now, sender=user_id,
+            origin_id, me, seq = self._take_seq(conn)
+            if receiver.lower() == me.lower():
+                raise ValueError("can't send a message to yourself")
+            record = dict(origin_id=origin_id, seq=seq, time_created=now, sender=me,
                           receiver=receiver, content=content, is_dead=0, time_received=now)
             self._insert(conn, "messages", record)
         return record
@@ -218,7 +247,7 @@ class Database:
         """Update this user's own current position."""
         device = self._require_device()
         now = time.time()
-        record = dict(user=device["user_id"], origin_id=device["device_id"], time_created=now,
+        record = dict(user=device["name"], origin_id=device["device_id"], time_created=now,
                       latitude=latitude, longitude=longitude, time_received=now)
         with self._connect() as conn:
             self._upsert_geolocation(conn, record)
@@ -240,6 +269,36 @@ class Database:
             query, params = query + " WHERE time_created > ?", (since,)
         with self._connect() as conn:
             return [dict(r) for r in conn.execute(query + " ORDER BY time_created", params)]
+
+    def contacts(self):
+        """Everyone this device knows about, from any data it holds, except itself.
+
+        Includes their last known position when we have one.
+        """
+        device = self.get_device()
+        me = device["name"] if device else None
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT name, MAX(last_heard) AS last_heard FROM ("
+                "  SELECT user AS name, time_created AS last_heard FROM geolocations"
+                "  UNION ALL SELECT sender, time_created FROM messages"
+                "  UNION ALL SELECT receiver, NULL FROM messages"
+                "  UNION ALL SELECT sender, time_created FROM locales"
+                ") WHERE name IS NOT ? GROUP BY name COLLATE NOCASE ORDER BY name COLLATE NOCASE",
+                (me,)).fetchall()
+            positions = {r["user"].lower(): dict(r) for r in conn.execute(
+                "SELECT user, latitude, longitude, time_created FROM geolocations")}
+        result = []
+        for row in rows:
+            pos = positions.get(row["name"].lower())
+            result.append({
+                "name": row["name"],
+                "last_heard": row["last_heard"],
+                "latitude": pos["latitude"] if pos else None,
+                "longitude": pos["longitude"] if pos else None,
+                "position_time": pos["time_created"] if pos else None,
+            })
+        return result
 
     def export(self, since=None):
         """Everything this device would share with another device or the server.
@@ -263,7 +322,7 @@ class Database:
         Returns how many records of each table were new or changed.
         """
         now = time.time()
-        user_id = self._require_device()["user_id"]
+        me = self._require_device()["name"]
         counts = dict.fromkeys(SHARED_TABLES, 0)
         with self._connect() as conn:
             # Tombstones first, so they also kill messages arriving in this batch
@@ -279,7 +338,7 @@ class Database:
 
             for record in data.get("messages", []):
                 record = self._clean("messages", record, now)
-                if self._merge_message(conn, record, user_id):
+                if self._merge_message(conn, record, me):
                     counts["messages"] += 1
 
             for record in data.get("geolocations", []):
@@ -288,8 +347,8 @@ class Database:
         self.purge()
         return counts
 
-    def _merge_message(self, conn, record, user_id):
-        mine = user_id in (record["sender"], record["receiver"])
+    def _merge_message(self, conn, record, me):
+        mine = me.lower() in (record["sender"].lower(), record["receiver"].lower())
         tombstoned = conn.execute(
             "SELECT 1 FROM tombstones WHERE target_origin_id = ? AND target_seq = ?",
             (record["origin_id"], record["seq"])).fetchone()
@@ -336,7 +395,7 @@ class Database:
         """Apply the age rules: expire messages and drop old tombstones."""
         now = time.time()
         device = self.get_device()
-        user_id = device["user_id"] if device else None
+        me = device["name"] if device else None
         with self._connect() as conn:
             # Old messages are deleted, except on the sender's and receiver's devices,
             # where they are kept but marked dead
@@ -344,7 +403,7 @@ class Database:
                          (now - MESSAGE_TTL,))
             conn.execute("DELETE FROM messages WHERE time_created < ? "
                          "AND sender IS NOT ? AND receiver IS NOT ?",
-                         (now - MESSAGE_TTL, user_id, user_id))
+                         (now - MESSAGE_TTL, me, me))
             conn.execute("DELETE FROM tombstones WHERE time_created < ?",
                          (now - TOMBSTONE_TTL,))
 

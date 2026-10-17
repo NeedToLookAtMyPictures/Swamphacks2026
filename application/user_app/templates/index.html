@@ -16,7 +16,19 @@
 
   <main>
     <section id="messages" class="panel active">
-      <!-- Messages tab: intentionally blank for now -->
+      <form id="compose">
+        <label>To
+          <input id="compose-to" list="contact-list" placeholder="someone you've met, or any name"
+                 pattern="[A-Za-z0-9_\-]{1,32}" required autocomplete="off">
+        </label>
+        <datalist id="contact-list"></datalist>
+        <textarea id="compose-content" placeholder="Message" rows="3" required></textarea>
+        <div class="compose-row">
+          <span id="compose-status"></span>
+          <button>Send</button>
+        </div>
+      </form>
+      <div id="message-list"></div>
     </section>
 
     <section id="map" class="panel">
@@ -39,6 +51,7 @@
   <script>window.MAP_INFO = {{ map_info | tojson }};</script>
   <script src="{{ url_for('static', filename='vendor/leaflet/leaflet.js') }}"></script>
   <script src="{{ url_for('static', filename='vendor/protomaps-leaflet/protomaps-leaflet.js') }}"></script>
+  <script src="{{ url_for('static', filename='messages.js') }}"></script>
   <script src="{{ url_for('static', filename='debug.js') }}"></script>
   <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>

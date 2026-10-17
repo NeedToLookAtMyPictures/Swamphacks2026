@@ -2,16 +2,17 @@
 
 Device (this user, never shared)
     GET    /api/device                      this device's info
-    POST   /api/device                      create identity {name, user_id?, device_id?}
+    POST   /api/device                      create identity {name, device_id?}; name must be unique
     PATCH  /api/device                      update mutable fields {last_server_sync}
 
 Records created on this device
     POST   /api/locales                     {location, name, comment?}
-    POST   /api/messages                    {receiver, content}
+    POST   /api/messages                    {receiver, content}; receiver is a name
     POST   /api/messages/<origin>/<seq>/delivered   receiver marks a message delivered
     PUT    /api/location                    {latitude, longitude} this user's position
 
 Reading
+    GET    /api/contacts                    everyone this device knows about (to pick a receiver)
     GET    /api/<table>?since=<time>        locales, messages, geolocations, tombstones
     GET    /api/<table>/<origin>/<seq>      one locale, message or tombstone
 
@@ -28,7 +29,7 @@ from database import SHARED_TABLES, DeviceNotInitialized
 
 api = Blueprint("api", __name__, url_prefix="/api")
 
-IMMUTABLE_DEVICE_FIELDS = {"device_id", "user_id", "name", "time_created", "next_seq"}
+IMMUTABLE_DEVICE_FIELDS = {"device_id", "name", "time_created", "next_seq"}
 
 
 def db():
@@ -80,7 +81,7 @@ def init_device():
     if db().get_device() is not None:
         return jsonify(error="device already initialized; its identity is immutable"), 409
     data = body("name")
-    device = db().init_device(data["name"], data.get("user_id"), data.get("device_id"))
+    device = db().init_device(data["name"], data.get("device_id"))
     return jsonify(device), 201
 
 
@@ -112,7 +113,7 @@ def mark_delivered(origin_id, seq):
     message = db().get("messages", origin_id, seq)
     if message is None:
         return jsonify(error="no such message"), 404
-    if message["receiver"] != db().get_device()["user_id"]:
+    if message["receiver"].lower() != db().get_device()["name"].lower():
         return jsonify(error="only the receiver can mark a message delivered"), 403
     return jsonify(db().mark_delivered(origin_id, seq)), 201
 
@@ -124,6 +125,11 @@ def set_location():
 
 
 # -- reading ------------------------------------------------------------------------
+
+@api.get("/contacts")
+def contacts():
+    return jsonify(db().contacts())
+
 
 @api.get("/<table>")
 def list_table(table):

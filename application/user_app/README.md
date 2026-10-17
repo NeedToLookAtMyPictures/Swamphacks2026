@@ -50,10 +50,19 @@ Configuration issue:
 | `messages` | yes | (origin_id, seq) | dead after 31 days or once delivered |
 | `geolocations` | yes | user | newest position wins; ties go to the higher device ID |
 | `tombstones` | yes | (origin_id, seq) | kills the target message; deleted after 31 days |
-| `device_info` | **no** | single row | `device_id`, `user_id`, `name` are immutable; `next_seq`, `last_server_sync` |
+| `device_info` | **no** | single row | `device_id` and `name` are immutable; `next_seq`, `last_server_sync` |
 
 Every record this device creates gets `origin_id = device_id` and the next
-`seq`. Expired messages are deleted, except on the sender's and receiver's
+`seq`.
+
+People are identified by their **name**, which is unique between people and
+can't be changed (1-32 letters, digits, `_` or `-`, compared ignoring case).
+Messages are addressed to a name, so you can send to someone you've
+encountered or to any name at all; the message is passed from device to device
+until the one with that name sees it. Offline, the app can only refuse names
+it has already seen, so real uniqueness has to come from the server at setup.
+
+If you have a `data/user.db` from before names replaced `user_id`, delete it. Expired messages are deleted, except on the sender's and receiver's
 devices, where they're kept (marked dead) but no longer shared.
 
 ### API
@@ -63,10 +72,11 @@ All endpoints take and return JSON. Full list in `api.py`.
 | Method | Path | What it does |
 |---|---|---|
 | GET | `/api/device` | this device's info |
-| POST | `/api/device` | create identity once: `{name, user_id?, device_id?}` (IDs are generated if left out) |
+| POST | `/api/device` | create identity once: `{name, device_id?}` (`device_id` is generated if left out) |
 | PATCH | `/api/device` | update mutable fields: `{last_server_sync}` |
 | POST | `/api/locales` | `{location, name, comment?}` |
-| POST | `/api/messages` | `{receiver, content}` |
+| POST | `/api/messages` | `{receiver, content}`: `receiver` is a name |
+| GET | `/api/contacts` | everyone this device knows about, with last known position |
 | POST | `/api/messages/<origin_id>/<seq>/delivered` | receiver marks a message delivered (creates a tombstone) |
 | PUT | `/api/location` | `{latitude, longitude}`: this user's current position |
 | GET | `/api/<table>?since=<time>` | list `locales`, `messages`, `geolocations` or `tombstones` |
@@ -82,6 +92,6 @@ Tests: `python -m unittest test_database`
 
 ## Tabs
 
-- **Messages**: blank for now
+- **Messages**: send to someone you've encountered (suggested as you type) or any name; shows messages you sent and received
 - **Map**: offline Leaflet map
 - **Debug**: shows every table in the local database (refresh button; offers to create the device if it has no identity yet)
