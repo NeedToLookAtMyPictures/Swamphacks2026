@@ -1,0 +1,47 @@
+{
+  "_comment": "Example incremental update from the server, after sample_global_locales.json: one locale changed, two added, one deleted, one stale edit ignored. Load with: python global_database.py load sample_global_update.json",
+  "full": false,
+  "server_time": 1792600000,
+  "locales": [
+    {
+      "id": "water-bivens-arm",
+      "category": "water",
+      "name": "Bivens Arm hand pump",
+      "latitude": 29.6262,
+      "longitude": -82.3416,
+      "description": "BROKEN: pump handle missing, use Lake Alice",
+      "time_updated": 1792600000
+    },
+    {
+      "id": "camp-paynes-north",
+      "category": "campsite",
+      "name": "Paynes Prairie north camp",
+      "latitude": 29.599,
+      "longitude": -82.33,
+      "description": "New: 5 sites, opened this week",
+      "time_updated": 1792600000
+    },
+    {
+      "id": "water-paynes-north",
+      "category": "water",
+      "name": "Paynes Prairie north tap",
+      "latitude": 29.5995,
+      "longitude": -82.329,
+      "description": "New potable tap at the camp",
+      "time_updated": 1792600000
+    },
+    {
+      "id": "camp-prairie-rim",
+      "deleted": true
+    },
+    {
+      "id": "water-depot-park",
+      "category": "water",
+      "name": "Depot Park fountain",
+      "latitude": 29.6436,
+      "longitude": -82.3195,
+      "description": "STALE EDIT: should not appear",
+      "time_updated": 1791999999
+    }
+  ]
+}

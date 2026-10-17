@@ -6,8 +6,11 @@ let globalLocales = [];             // rows from /api/global/locales, sorted by 
 let globalLocalesLayer = null;
 const hiddenLocales = new Set();    // ids of locales the user has hidden
 
-const CATEGORY_COLORS = { water: "#1e88e5", campsite: "#2e7d32", shelter: "#8d6e63" };
-const EXTRA_COLORS = ["#8e24aa", "#f4511e", "#00897b", "#c0ca33", "#6d4c41", "#3949ab"];
+const CATEGORY_COLORS = {
+  water: "#1e88e5", campsite: "#2e7d32", shelter: "#8d6e63",
+  trailhead: "#f4511e", restroom: "#8e24aa", "first aid": "#e53935",
+};
+const EXTRA_COLORS = ["#00897b", "#c0ca33", "#ffb300", "#d81b60", "#546e7a"];  // other categories
 
 function categoryColor(category) {
   if (CATEGORY_COLORS[category]) return CATEGORY_COLORS[category];

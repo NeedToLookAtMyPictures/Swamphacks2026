@@ -116,8 +116,15 @@ not older than ours), and one with `"deleted": true` is removed.
 Until the server exists, load a file in the same format:
 
 ```bash
-python global_database.py load sample_global_locales.json
+python global_database.py load sample_global_locales.json   # full: 24 locales in 6 categories
+python global_database.py load sample_global_update.json    # then an incremental update
 ```
+
+The example places are real Gainesville parks, but their amenities are made up.
+The update changes one locale (Bivens Arm pump marked broken), adds two
+(Paynes Prairie north camp and tap), deletes one (Prairie rim camp), and
+includes a stale edit to Depot Park fountain that is ignored because it is
+older than what the device has. Load `sample_global_locales.json` again to reset.
 
 | Method | Path | What it does |
 |---|---|---|
