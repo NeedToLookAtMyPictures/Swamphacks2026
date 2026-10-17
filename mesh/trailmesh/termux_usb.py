@@ -39,6 +39,7 @@ FD_ENV = "TERMUX_USB_FD"  # set by `termux-usb -E` for the program it starts
 
 # libusb constants
 OPTION_NO_DEVICE_DISCOVERY = 2  # named LIBUSB_OPTION_WEAK_AUTHORITY before libusb 1.0.26; same value
+ERROR_BUSY = -6
 ERROR_TIMEOUT = -7
 ERROR_INTERRUPTED = -10
 
@@ -138,7 +139,7 @@ def _load_libusb():
         "libusb_exit": ([P], None),
         "libusb_wrap_sys_device": ([P, ctypes.c_ssize_t, ctypes.POINTER(P)], I),  # sys_dev is intptr_t
         "libusb_close": ([P], None),
-        "libusb_detach_kernel_driver": ([P, I], I),
+        "libusb_set_auto_detach_kernel_driver": ([P, I], I),
         "libusb_claim_interface": ([P, I], I),
         "libusb_release_interface": ([P, I], I),
         "libusb_clear_halt": ([P, U8], I),
@@ -213,11 +214,21 @@ class TermuxUsbTransport(Transport):
                 lib.libusb_wrap_sys_device(self._ctx, self._fd, ctypes.byref(self._handle)), "libusb_wrap_sys_device"
             )
             comm, data, self._ep_in, self._ep_out = find_cdc(self._config_descriptor())
+            # Some Android kernels bind their own cdc_acm driver to the board. With auto
+            # detach, claiming takes the interface from a kernel driver in one step
+            # (USBDEVFS_DISCONNECT_CLAIM), but never from another app that claimed it.
+            lib.libusb_set_auto_detach_kernel_driver(self._handle, 1)  # unsupported is fine: claim then says why
             for iface in (comm, data):
                 if iface is None:
                     continue
-                lib.libusb_detach_kernel_driver(self._handle, iface)  # fails harmlessly if none is attached
-                self._check(lib.libusb_claim_interface(self._handle, iface), f"claim interface {iface}")
+                rc = lib.libusb_claim_interface(self._handle, iface)
+                if rc == ERROR_BUSY:
+                    raise TransportError(
+                        f"the board's USB interface {iface} is in use by another app. Close Chrome tabs using "
+                        "it (serial-test-mobile.html), USB serial terminal apps, and any other main.py / "
+                        "run_node.py still running (`pkill -f main.py`), or unplug the board and plug it back in"
+                    )
+                self._check(rc, f"claim interface {iface}")
                 self._claimed.append(iface)
             for ep in (self._ep_in, self._ep_out):
                 lib.libusb_clear_halt(self._handle, ep)  # reset data toggles left by a previous run
