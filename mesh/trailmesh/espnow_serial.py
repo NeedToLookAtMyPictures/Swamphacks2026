@@ -1,6 +1,10 @@
-"""ESP-NOW link: talks to an ESP32 running firmware/espnow_bridge over USB serial.
+"""ESP-NOW link: talks to an ESP32 running firmware/espnow_bridge over USB.
 
 The ESP32 is a thin radio bridge; all protocol logic runs here in Python.
+How the bytes reach the board is a Transport (transport.py), chosen from the
+port: pyserial on laptops, termux-usb on Android. This module only speaks the
+bridge protocol and is the same for every transport.
+
 Host <-> ESP32 messages are SLIP-framed, first byte is the command:
 
   host -> esp32
@@ -21,6 +25,7 @@ import struct
 import threading
 
 from .link import Link, RxFrame
+from .transport import PortInUse, Transport, TransportError, open_transport
 
 BROADCAST = b"\xff" * 6
 
@@ -69,24 +74,28 @@ class SlipDecoder:
         return frames
 
 
-class PortInUse(Exception):
-    """The serial port is locked by another program."""
+class LinkLost(ConnectionError):
+    """The board is gone and the transport can't reopen it (Android). Restart the program."""
 
 
 class EspNowSerialLink(Link):
     mtu = 250  # ESP-NOW v1 limit; works with every ESP-IDF version
     radio_on_at_start = True
 
-    def __init__(self, port: str, baud: int = 460800, log=print, reconnect_interval: float = 1.0):
-        import serial  # pyserial; imported here so the simulator works without it
+    def __init__(self, port: str = "auto", baud: int = 460800, log=print, reconnect_interval: float = 1.0):
+        """port: see transport.open_transport ("auto", "COM3", "/dev/ttyACM0", "termux-usb", ...).
 
-        self._serial = serial
+        Raises TransportError if the board can't be opened at startup. On Android,
+        if this program wasn't started by termux-usb, this reruns it under termux-usb
+        and exits (see termux_usb.py).
+        """
         self.port = port
         self.baud = baud
         self.reconnect_interval = reconnect_interval
         self._log = log
         self._lock = threading.RLock()
-        self._ser = None
+        self._transport: Transport | None = None
+        self._reconnectable = True
         self._rx: queue.Queue[RxFrame] = queue.Queue()
         self.mac: bytes | None = None
         self.status: dict | None = None  # filled by each INFO reply; see request_status()
@@ -95,39 +104,31 @@ class EspNowSerialLink(Link):
         # because the board forgets everything when it is unplugged or reset.
         self._radio_wanted = self.radio_on_at_start
         self._partner: int | None = None
-        self._open()  # raises if the port doesn't exist at startup
+        self._open()
         self._stop = threading.Event()
         self._reader = threading.Thread(target=self._read_loop, daemon=True)
         self._reader.start()
 
     @property
     def connected(self) -> bool:
-        return self._ser is not None
+        return self._transport is not None
+
+    @property
+    def lost(self) -> bool:
+        """True once the board is gone for good: disconnected, and the transport can't reopen it."""
+        return self._transport is None and not self._reconnectable
 
     def _emit(self, *msg) -> None:
         if self._log:
             self._log(*msg)
 
     def _open(self) -> None:
-        # serial_for_url takes a device name ("COM3", "/dev/ttyUSB0") or a pyserial
-        # URL such as "socket://127.0.0.1:5000", which the tests use for a fake ESP32.
-        # exclusive=True locks the port: two programs reading one board steal each
-        # other's bytes and both see endless fake disconnects. With the lock, the
-        # second program gets a clear "in use" error instead. (Windows ports are
-        # always exclusive.)
-        try:
-            ser = self._serial.serial_for_url(self.port, self.baud, timeout=0.05, exclusive=True)
-        except self._serial.SerialException as e:
-            if "lock" in str(e).lower():
-                raise PortInUse(
-                    f"{self.port} is already open in another program (another main.py / run_node.py / "
-                    f"diagnose.py, or a serial monitor). Close it first."
-                ) from e
-            raise
+        t = open_transport(self.port, self.baud)
         with self._lock:
-            self._ser = ser
+            self._transport = t
+            self._reconnectable = t.reconnectable
         self._restore()
-        self._write(bytes([CMD_GET_INFO]))
+        self._write(bytes([CMD_GET_INFO]))  # ask who we're talking to
 
     def _restore(self) -> None:
         """Clear any partner filter left over from an interrupted session and restore the radio state."""
@@ -136,32 +137,39 @@ class EspNowSerialLink(Link):
 
     def _lost(self, err: Exception) -> None:
         with self._lock:
-            if self._ser is None:
+            t = self._transport
+            if t is None:
                 return
-            try:
-                self._ser.close()
-            except Exception:
-                pass
-            self._ser = None
-        self._emit(f"[link] lost connection to board on {self.port} ({err}); retrying")
+            self._transport = None
+            t.close()
+        if self._reconnectable:
+            self._emit(f"[link] lost connection to board on {self.port} ({err}); retrying")
+        else:
+            self._emit(f"[link] lost connection to board on {self.port} ({err}); "
+                       "this platform can't reopen it, restart the program")
 
     def _write(self, msg: bytes) -> None:
         with self._lock:
-            if self._ser is None:
+            t = self._transport
+            if t is None:
                 self.dropped_writes += 1  # the protocol's retransmits recover these
                 return
             try:
-                self._ser.write(slip_encode(msg))
-            except (OSError, self._serial.SerialException) as e:
+                t.write(slip_encode(msg))
+            except TransportError as e:
                 self._lost(e)
 
     def _read_loop(self) -> None:
         dec = SlipDecoder()
         busy_reported = False
         while not self._stop.is_set():
-            ser = self._ser
-            if ser is None:
+            t = self._transport
+            if t is None:
+                if not self._reconnectable:
+                    return  # poll() raises LinkLost from now on
                 self._stop.wait(self.reconnect_interval)
+                if self._stop.is_set():
+                    return
                 try:
                     self._open()
                     dec = SlipDecoder()
@@ -170,28 +178,30 @@ class EspNowSerialLink(Link):
                     if not busy_reported:
                         self._emit(f"[link] {e}")
                         busy_reported = True
-                except (OSError, self._serial.SerialException):
+                except TransportError:
                     pass  # still unplugged
                 else:
                     busy_reported = False
                 continue
             try:
-                data = ser.read(512)
-            except (OSError, TypeError, self._serial.SerialException) as e:
-                # TypeError: pyserial can raise it if the port is closed under it.
+                data = t.read(512)
+            except TransportError as e:
                 self._lost(e)
                 continue
             for msg in dec.feed(data):
-                if not msg:
-                    continue
-                if msg[0] == EVT_RECV and len(msg) >= 8:
-                    self._rx.put(RxFrame(msg[8:], msg[1:7], struct.unpack("b", msg[7:8])[0]))
-                elif msg[0] == EVT_INFO and len(msg) >= 7:
-                    self._on_info(msg)
-                elif msg[0] == EVT_LOG:
-                    self._emit("[esp32]", msg[1:].decode(errors="replace"))
-                else:
-                    self._on_event(msg)
+                self._handle(msg)
+
+    def _handle(self, msg: bytes) -> None:
+        if not msg:
+            return
+        if msg[0] == EVT_RECV and len(msg) >= 8:
+            self._rx.put(RxFrame(msg[8:], msg[1:7], struct.unpack("b", msg[7:8])[0]))
+        elif msg[0] == EVT_INFO and len(msg) >= 7:
+            self._on_info(msg)
+        elif msg[0] == EVT_LOG:
+            self._emit("[esp32]", msg[1:].decode(errors="replace"))
+        else:
+            self._on_event(msg)
 
     def _on_event(self, msg: bytes) -> None:
         """Board messages this class doesn't know (subclasses for other firmware)."""
@@ -207,12 +217,16 @@ class EspNowSerialLink(Link):
         self._write(bytes([CMD_SEND]) + (dest or BROADCAST) + payload)
 
     def poll(self) -> list[RxFrame]:
+        """Frames received since the last poll. Raises LinkLost once the board is gone for good."""
         out = []
         while True:
             try:
                 out.append(self._rx.get_nowait())
             except queue.Empty:
-                return out
+                break
+        if not out and self.lost:
+            raise LinkLost(f"lost the board on {self.port}; restart the program to reconnect")
+        return out
 
     def request_status(self) -> None:
         """Ask the board for a fresh INFO reply; .mac and .status update when it arrives."""
@@ -230,6 +244,6 @@ class EspNowSerialLink(Link):
         self._stop.set()
         self._reader.join(timeout=1)
         with self._lock:
-            if self._ser is not None:
-                self._ser.close()
-                self._ser = None
+            if self._transport is not None:
+                self._transport.close()
+                self._transport = None

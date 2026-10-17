@@ -2,6 +2,7 @@
 
 Run this on BOTH computers at the same time:
 
+    python examples/diagnose.py              (the one ESP32 plugged in)
     python examples/diagnose.py --port /dev/ttyACM0
     python examples/diagnose.py --board heltec --radio lora --port COM5     (or --radio espnow)
 
@@ -17,8 +18,9 @@ import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from trailmesh.espnow_serial import CMD_GET_INFO  # noqa: E402
+from trailmesh.espnow_serial import CMD_GET_INFO, LinkLost  # noqa: E402
 from trailmesh.radio import BOARDS, open_board, radio_link  # noqa: E402
+from trailmesh.transport import TransportError  # noqa: E402
 from trailmesh.wire import Frame  # noqa: E402
 
 PING_MAGIC = b"\x00\x00\x00\x00DIAG"  # sender id 0 never decodes as a real trailmesh device
@@ -39,7 +41,7 @@ def refresh_status(link, timeout=2.0):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--port", required=True)
+    ap.add_argument("--port", default="auto", help="auto, COM3, /dev/ttyACM0, termux-usb, ...")
     ap.add_argument("--seconds", type=float, default=30)
     ap.add_argument("--board", choices=BOARDS, default="espnow",
                     help="espnow: firmware/espnow_bridge; heltec: firmware/heltec_bridge (LoRa + ESP-NOW)")
@@ -49,7 +51,11 @@ def main():
     radio = args.radio or ("lora" if args.board == "heltec" else "espnow")
 
     logs = []
-    board = open_board(args.board, args.port, sf=args.sf, log=lambda *a: logs.append(" ".join(map(str, a))))
+    try:
+        board = open_board(args.board, args.port, sf=args.sf, log=lambda *a: logs.append(" ".join(map(str, a))))
+    except TransportError as e:
+        print(f"FAIL: can't open the board: {e}")
+        return 1
     link = radio_link(board, radio)
     link.set_radio(True)
     try:
@@ -134,4 +140,7 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except LinkLost as e:
+        sys.exit(f"FAIL: {e}")

@@ -46,6 +46,7 @@ python main.py --server ""           # no server address, only look on the wifi
 python main.py --no-lan              # don't look for a server on the wifi
 python main.py --mesh-port /dev/ttyACM0 --mesh-demo   # also sync over an ESP32 (see ../../mesh)
 python main.py --server "" --no-lan --mesh-port /dev/ttyACM0 --mesh-demo   # mesh only, to test it
+python main.py --phone --mesh-demo   # Android (Termux), ESP32 plugged into the phone (see below)
 python main.py --log-requests        # also log every successful GET (hidden: the page polls)
 ```
 
@@ -88,6 +89,29 @@ There's no internet to get a real certificate, so the phone warns that the
 connection isn't private: tap **Advanced → Proceed** once, then allow location
 when asked. The certificate is kept, so it's only accepted once per phone;
 delete the two files to make a new one (for example if the Pi's name changed).
+
+### Android phone (Termux) + ESP32 over USB
+
+The app can run on the phone itself, in Termux, with the ESP32 plugged into the
+phone (USB-C or an OTG adapter). Android apps can't open serial ports, so
+`--phone` reaches the board through `termux-usb` instead (it's the default
+`--mesh-port` then; pass `--mesh-port /dev/bus/usb/...` if several USB devices
+are plugged in).
+
+One-time setup: install the Termux:API app from the same place as Termux
+(F-Droid or GitHub), then `pkg install python termux-api libusb` and
+`pip install -r requirements.txt`.
+
+```bash
+python main.py --phone --mesh-demo
+```
+
+The program reruns itself through `termux-usb` to get access to the board:
+accept Android's dialog. Then open `http://127.0.0.1:5000` in the phone's
+browser (localhost, so GPS works without `--https`). Android only grants the
+board to a newly started program: if it's unplugged, the mesh stops (the app
+keeps working) until `main.py` is started again. Details in
+`../../mesh/docs/transport.md`.
 
 ## Database
 

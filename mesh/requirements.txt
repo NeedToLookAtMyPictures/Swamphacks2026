@@ -1,2 +1,6 @@
 # Python 3.10+. The trailmesh package and tests otherwise use only the standard library.
-pyserial>=3.5  # EspNowSerialLink (USB serial to the ESP32 bridge)
+pyserial>=3.5  # laptops: opens the ESP32's USB port (not needed on Android)
+
+# Android (Termux) instead needs, from Termux's package manager rather than pip:
+#   pkg install python termux-api libusb
+# plus the Termux:API app, installed from the same place as Termux (F-Droid or GitHub).
