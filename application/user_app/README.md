@@ -22,6 +22,9 @@ python download_locales.py map    # Gainesville to Hawthorne, FL, zoom 8-15
 requests to pull only the tiles inside the area, and saves them as one file,
 `data/map.pmtiles` (git-ignored). Running it again replaces the old map.
 
+You can skip this when the app can reach a server: it downloads the server's map
+(`application/server/map/`) during sync, and replaces a map made here with it.
+
 Other areas and sources:
 
 ```bash
@@ -41,10 +44,19 @@ python main.py --server http://<server>:8000   # sync with another server
 python main.py --server https://a.example,http://10.0.0.5:8000   # several, tried in order
 python main.py --server ""           # no server address, only look on the wifi
 python main.py --no-lan              # don't look for a server on the wifi
+python main.py --mesh-port /dev/ttyACM0 --mesh-demo   # also sync over an ESP32 (see ../../mesh)
+python main.py --server "" --no-lan --mesh-port /dev/ttyACM0 --mesh-demo   # mesh only, to test it
+python main.py --log-requests        # also log every successful GET (hidden: the page polls)
 ```
 
+With a server and the mesh both running, the server usually gets data to the
+other device first. Two devices that already hold the same data skip the mesh
+exchange (their beacons' digests match), so there are no handshakes to see. To
+watch the mesh on its own, run both devices with `--server "" --no-lan`.
+
 A background thread looks for a server every 30 seconds, and while one answers
-it syncs every 5 seconds. It tries the ones given with `--server` (or `SERVER_URL`; several can be
+it syncs every 5 seconds, and right away when you send something or a sync brings
+in something new. It tries the ones given with `--server` (or `SERVER_URL`; several can be
 comma-separated and are tried in order), by default the demo server's public URL
 `https://heuslerene.com/server` (`PUBLIC_SERVER_URL` in `main.py`, see
 `../server/README.md`) and then its wifi

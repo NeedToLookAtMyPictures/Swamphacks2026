@@ -28,6 +28,7 @@ Global data (set by the company, loaded once from the server; users can't change
     GET    /api/global/trails               trails with their lines parsed from GPX
     GET    /api/global/trails/<id>.gpx      a trail's original GPX file
     GET    /api/global/info                 {loaded_at, version}
+    GET    /api/map/info                    the offline map {name, bbox, center, zooms, version}
     GET    /api/distances?from=&to=         walking distance along the global trails to global
                                             locales; from a locale id or "lat,lon" (default:
                                             this user's position), to a locale id (default: all)
@@ -35,12 +36,14 @@ Global data (set by the company, loaded once from the server; users can't change
                                             server sends it during sync instead)
 """
 
+import json
 import sqlite3
 
 from flask import Blueprint, Response, current_app, jsonify, request
 
 import server_sync
 from database import SHARED_TABLES, DeviceNotInitialized, check_name
+from download_locales import DEFAULT_BBOX, MAP_FILE, MAP_INFO_FILE
 from trail_distance import TrailNetwork
 
 api = Blueprint("api", __name__, url_prefix="/api")
@@ -50,6 +53,15 @@ IMMUTABLE_DEVICE_FIELDS = {"device_id", "name", "time_created", "next_seq"}
 
 def db():
     return current_app.config["DATABASE"]
+
+
+@api.after_request
+def sync_soon(response):
+    """Anything written here (a message, a comment, a position) goes to the server now
+    rather than at the next scheduled sync, so the other person sees it sooner."""
+    if request.method != "GET" and response.status_code < 400:
+        server_sync.wake()
+    return response
 
 
 def global_db():
@@ -257,6 +269,28 @@ def global_trail_gpx(trail_id):
 @api.get("/global/info")
 def global_info():
     return jsonify(global_db().info())
+
+
+def load_map_info():
+    """The offline map's name, bounds and zoom levels, or the defaults when there's no map.
+
+    version is set for a map from the server; the page reloads the map when it changes."""
+    if MAP_FILE.exists() and MAP_INFO_FILE.exists():
+        return {"version": None, **json.loads(MAP_INFO_FILE.read_text())}
+    min_lon, min_lat, max_lon, max_lat = DEFAULT_BBOX
+    return {
+        "name": None,
+        "bbox": DEFAULT_BBOX,
+        "center": [(min_lat + max_lat) / 2, (min_lon + max_lon) / 2],
+        "min_zoom": 8,
+        "max_zoom": 15,
+        "version": None,
+    }
+
+
+@api.get("/map/info")
+def map_info():
+    return jsonify(load_map_info())
 
 
 @api.post("/global/load")

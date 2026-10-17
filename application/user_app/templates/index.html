@@ -43,9 +43,8 @@
     </section>
 
     <section id="map" class="panel">
-      {% if not map_info.name %}
-      <div class="notice">No offline map downloaded. Run <code>python download_locales.py map</code>.</div>
-      {% endif %}
+      <div id="no-map" class="notice"{% if map_info.name %} hidden{% endif %}>No offline map yet. It
+        downloads from the server on the next sync, or run <code>python download_locales.py map</code>.</div>
       <div id="leaflet-map"></div>
       <div id="locale-sheet" hidden>
         <div class="locale-sheet-top">

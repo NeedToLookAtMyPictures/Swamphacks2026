@@ -5,17 +5,21 @@ the ones given with --server, or else one on the same wifi (see discovery.py).
 Once it reaches one, it syncs with it every SYNC_EVERY seconds: the device sends
 the records that arrived since its last push and merges what the server got
 since its last pull. When the server's global data (water sources, campsites,
-trails) differs from the device's copy, it comes along and replaces it. If a
-sync fails, it goes back to looking.
+trails) differs from the device's copy, it comes along and replaces it, and the
+same for the offline map, which is downloaded separately since it's large. If a
+sync fails, it goes back to looking. Writing something locally (wake()) or
+receiving something new syncs again right away instead of waiting.
 
 Only the standard library is used, so the app has no extra dependency.
 """
 
+import hashlib
 import json
 import threading
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 import discovery
 
@@ -23,6 +27,15 @@ SYNC_EVERY = 5     # seconds between syncs while a server answers
 CHECK_EVERY = 30   # seconds between looking for a server while there is none
 TIMEOUT = 15       # seconds, for a sync
 PING_TIMEOUT = 3   # seconds, for checking whether a server is there
+MAP_TIMEOUT = 120  # seconds without data before giving up on a map download
+
+# Set to sync right away instead of at the next SYNC_EVERY, e.g. after sending a message
+_wake = threading.Event()
+
+
+def wake():
+    """Sync now: something was written here that other devices should get soon."""
+    _wake.set()
 
 
 class ServerError(Exception):
@@ -47,16 +60,62 @@ def call(server_url, path, payload=None, timeout=TIMEOUT):
         raise ServerError(f"{exc.code}: {message}") from exc
 
 
+def download(server_url, path, dest, timeout=MAP_TIMEOUT):
+    """Save the file at path to dest. Returns its SHA-256."""
+    digest = hashlib.sha256()
+    request = urllib.request.Request(server_url.rstrip("/") + path,
+                                     headers={"ngrok-skip-browser-warning": "1"})
+    with urllib.request.urlopen(request, timeout=timeout) as response, open(dest, "wb") as out:
+        for chunk in iter(lambda: response.read(1 << 16), b""):
+            digest.update(chunk)
+            out.write(chunk)
+    return digest.hexdigest()
+
+
+def map_version(map_dir):
+    """The version of the map in map_dir (None if it has none, e.g. one from
+    download_locales.py: then the server's map replaces it)."""
+    tiles, info_file = Path(map_dir) / "map.pmtiles", Path(map_dir) / "map.json"
+    if not (tiles.exists() and info_file.exists()):
+        return None
+    try:
+        return json.loads(info_file.read_text()).get("version")
+    except ValueError:
+        return None
+
+
+def update_map(server_url, offer, map_dir):
+    """Download the map the server offered ({version, size, info}) into map_dir.
+
+    The new file only replaces the old one once it's complete and checked, so the
+    app keeps serving a working map the whole time.
+    """
+    map_dir = Path(map_dir)
+    map_dir.mkdir(parents=True, exist_ok=True)
+    tiles, info_file = map_dir / "map.pmtiles", map_dir / "map.json"
+    part = tiles.with_suffix(".pmtiles.part")
+    print(f"Downloading the server's map ({offer['size'] / 1e6:.1f} MB)")
+    try:
+        if download(server_url, "/api/map.pmtiles", part) != offer["version"]:
+            raise ValueError("the downloaded map doesn't match its version")
+        part.replace(tiles)
+    finally:
+        part.unlink(missing_ok=True)
+    info_file.write_text(json.dumps(dict(offer["info"], version=offer["version"]), indent=2))
+    print(f"Got the server's map: {offer['info'].get('name')}")
+
+
 def register(server_url, name, device_id=None):
     """The startup handshake: ask the server to reserve a name. Returns {name, device_id}."""
     return call(server_url, "/api/register", {"name": name, "device_id": device_id})
 
 
-def sync_once(db, server_url, global_db=None):
+def sync_once(db, server_url, global_db=None, map_dir=None):
     """One full exchange with the server. Raises OSError when it can't be reached.
 
     With global_db (a GlobalDatabase), also gets the server's global data when
-    this device's copy is missing or out of date."""
+    this device's copy is missing or out of date, and with map_dir (where the app
+    keeps map.pmtiles and map.json) the same for the offline map."""
     device = db.get_device()
     if device is None:
         return None  # no identity yet, nothing to sync
@@ -75,6 +134,8 @@ def sync_once(db, server_url, global_db=None):
     }
     if global_db is not None:
         request["global_version"] = global_db.info()["version"]
+    if map_dir is not None:
+        request["map_version"] = map_version(map_dir)
     result = call(server_url, "/api/sync", request)
     merged = db.merge(result["records"])
     if global_db is not None and result.get("global"):
@@ -82,6 +143,13 @@ def sync_once(db, server_url, global_db=None):
         print(f"Got the server's global data: {loaded}")
     db.update_device(last_server_sync=time.time(), last_push=push_cursor,
                      server_cursor=result["cursor"], server_id=server_id)
+    if map_dir is not None and result.get("map"):
+        # Last, so the records above are saved even if the download fails;
+        # it's tried again on the next sync
+        try:
+            update_map(server_url, result["map"], map_dir)
+        except (OSError, ValueError) as exc:
+            print(f"Map download failed: {exc}")
     return merged
 
 
@@ -128,8 +196,8 @@ class ServerFinder:
 class SyncLoop:
     """One step at a time, so the background thread stays a plain loop."""
 
-    def __init__(self, db, finder, global_db=None):
-        self.db, self.finder, self.global_db = db, finder, global_db
+    def __init__(self, db, finder, global_db=None, map_dir=None):
+        self.db, self.finder, self.global_db, self.map_dir = db, finder, global_db, map_dir
         self.url = None  # the server we're connected to, if any
 
     def step(self):
@@ -141,23 +209,30 @@ class SyncLoop:
                 return CHECK_EVERY
             print(f"Connected to {self.url} ({self.finder.current[1]})")
         try:
-            merged = sync_once(self.db, self.url, self.global_db)
+            merged = sync_once(self.db, self.url, self.global_db, self.map_dir)
         except (OSError, ServerError, ValueError) as exc:
             print(f"Server sync failed: {exc}")
             self.url = self.finder.current = None
             return CHECK_EVERY
         if merged and any(merged.values()):
             print(f"Synced with server: {merged}")
+            # Merging may have created records (a 'delivered' tombstone): send them now
+            return 0
         return SYNC_EVERY
 
 
-def start(db, finder, global_db=None):
+def start(db, finder, global_db=None, map_dir=None):
     """Sync with the server in a background thread for as long as the app runs."""
-    sync = SyncLoop(db, finder, global_db)
+    sync = SyncLoop(db, finder, global_db, map_dir)
 
     def loop():
         while True:
-            time.sleep(sync.step())
+            delay = sync.step()
+            if delay and sync.url is not None:  # no point waking up early with no server
+                _wake.wait(delay)
+            else:
+                time.sleep(delay)
+            _wake.clear()
 
     thread = threading.Thread(target=loop, name="server-sync", daemon=True)
     thread.start()

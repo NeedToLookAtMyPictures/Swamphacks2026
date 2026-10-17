@@ -19,7 +19,7 @@ Two hikers on one computer (each with its own database, web port and board):
 
 import argparse
 import ipaddress
-import json
+import logging
 import os
 import socket
 import subprocess
@@ -31,10 +31,10 @@ from pathlib import Path
 from flask import Flask, render_template, send_file
 
 import server_sync
-from api import api
+from api import api, load_map_info
 from database import Database
 from global_database import GlobalDatabase
-from download_locales import DATA_DIR, DEFAULT_BBOX, MAP_FILE, MAP_INFO_FILE
+from download_locales import DATA_DIR, MAP_FILE
 
 # The demo server (the laptop running application/server), tried in this order.
 # PUBLIC_SERVER_URL is its address on the internet (server/serve_public.sh prints
@@ -57,19 +57,6 @@ app.config["DATABASE"] = Database()
 app.config["SERVER"] = None  # a server_sync.ServerFinder, set in run()
 app.config["GLOBAL_DATABASE"] = GlobalDatabase()
 app.register_blueprint(api)
-
-
-def load_map_info():
-    if MAP_FILE.exists() and MAP_INFO_FILE.exists():
-        return json.loads(MAP_INFO_FILE.read_text())
-    min_lon, min_lat, max_lon, max_lat = DEFAULT_BBOX
-    return {
-        "name": None,
-        "bbox": DEFAULT_BBOX,
-        "center": [(min_lat + max_lat) / 2, (min_lon + max_lon) / 2],
-        "min_zoom": 8,
-        "max_zoom": 15,
-    }
 
 
 @app.route("/")
@@ -148,7 +135,18 @@ def start_mesh(db, serial_port, demo):
     threading.Thread(target=worker, daemon=True, name="mesh").start()
 
 
+class HideRoutineRequests(logging.Filter):
+    """The page re-reads the database every second or so; logging each of those
+    requests buries the sync and [mesh] lines. Writes and errors are still shown."""
+
+    def filter(self, record):
+        message = record.getMessage()
+        return not ('"GET ' in message and ('" 200 ' in message or '" 304 ' in message))
+
+
 def run(args):
+    if not args.log_requests:
+        logging.getLogger("werkzeug").addFilter(HideRoutineRequests())
     if args.db:
         app.config["DATABASE"] = Database(args.db)
     if not MAP_FILE.exists():
@@ -160,7 +158,7 @@ def run(args):
     if (args.server or not args.no_lan) and (
             not args.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true"):
         print(f"Syncing with {finder.describe()} whenever it can be reached")
-        server_sync.start(app.config["DATABASE"], finder, app.config["GLOBAL_DATABASE"])
+        server_sync.start(app.config["DATABASE"], finder, app.config["GLOBAL_DATABASE"], DATA_DIR)
     if args.mesh_port:
         if args.debug:
             sys.exit("--mesh-port can't be combined with --debug (the reloader would open the board twice)")
@@ -177,6 +175,8 @@ def main():
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=5000)
     parser.add_argument("--debug", action="store_true")
+    parser.add_argument("--log-requests", action="store_true",
+                        help="also log every successful GET (hidden by default: the page polls)")
     parser.add_argument("--server", default=os.environ.get("SERVER_URL", DEFAULT_SERVER_URLS),
                         help="servers to sync with whenever one can be reached, comma-separated "
                              f"and tried in order (default: $SERVER_URL, else {DEFAULT_SERVER_URLS}; "
