@@ -24,7 +24,9 @@ function renderMessage(m) {
   const outgoing = sameName(m.sender, myName);
   const broadcast = m.receiver === BROADCAST;
   const card = msgEl("div", undefined, `message ${outgoing ? "outgoing" : "incoming"}`);
-  if (m.is_dead) card.classList.add("dead");
+  // Messages to me are marked dead as soon as they arrive (delivered), so only
+  // grey out my own messages once they've been delivered or expired
+  if (m.is_dead && outgoing) card.classList.add("dead");
 
   const head = msgEl("div", undefined, "message-head");
   const to = broadcast ? "Everyone" : m.receiver;
@@ -33,16 +35,8 @@ function renderMessage(m) {
   card.appendChild(head);
   card.appendChild(msgEl("div", m.content, "message-body"));
 
-  if (m.is_dead) {
-    card.appendChild(msgEl("div", outgoing ? "delivered or expired" : "delivered", "message-note"));
-  } else if (!outgoing && !broadcast) {
-    const button = msgEl("button", "Mark delivered");
-    button.addEventListener("click", async () => {
-      await fetch(`/api/messages/${encodeURIComponent(m.origin_id)}/${m.seq}/delivered`,
-                  { method: "POST" });
-      loadMessages();
-    });
-    card.appendChild(button);
+  if (m.is_dead && outgoing) {
+    card.appendChild(msgEl("div", broadcast ? "expired" : "delivered or expired", "message-note"));
   }
   return card;
 }

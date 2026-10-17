@@ -149,7 +149,7 @@ main {
 
 #compose-status { color: #555; font-size: 14px; }
 
-#compose button, .message button {
+#compose button {
   padding: 6px 14px;
   border: none;
   border-radius: 4px;

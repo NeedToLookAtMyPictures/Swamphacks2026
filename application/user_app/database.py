@@ -234,14 +234,18 @@ class Database:
         return record
 
     def add_tombstone(self, target_origin_id, target_seq, reason):
-        now = time.time()
         with self._connect() as conn:
-            origin_id, _, seq = self._take_seq(conn)
-            record = dict(origin_id=origin_id, seq=seq, target_origin_id=target_origin_id,
-                          target_seq=target_seq, time_created=now, reason=reason,
-                          time_received=now)
-            self._insert(conn, "tombstones", record)
-            self._apply_tombstone(conn, record)
+            return self._create_tombstone(conn, target_origin_id, target_seq, reason)
+
+    def _create_tombstone(self, conn, target_origin_id, target_seq, reason):
+        """Create a tombstone on an already-open connection (e.g. inside merge)."""
+        now = time.time()
+        origin_id, _, seq = self._take_seq(conn)
+        record = dict(origin_id=origin_id, seq=seq, target_origin_id=target_origin_id,
+                      target_seq=target_seq, time_created=now, reason=reason,
+                      time_received=now)
+        self._insert(conn, "tombstones", record)
+        self._apply_tombstone(conn, record)
         return record
 
     def mark_delivered(self, origin_id, seq):
@@ -345,12 +349,26 @@ class Database:
                 record = self._clean("messages", record, now)
                 if self._merge_message(conn, record, me):
                     counts["messages"] += 1
+                self._deliver_if_mine(conn, record, me)
 
             for record in data.get("geolocations", []):
                 if self._upsert_geolocation(conn, self._clean("geolocations", record, now)):
                     counts["geolocations"] += 1
         self.purge()
         return counts
+
+    def _deliver_if_mine(self, conn, record, me):
+        """A message has reached the person it was addressed to: kill it everywhere.
+
+        Creates the 'delivered' tombstone, which then spreads like any other record.
+        Broadcasts have no single receiver, so they are never delivered.
+        """
+        if record["receiver"].lower() != me.lower():
+            return
+        row = conn.execute("SELECT is_dead FROM messages WHERE origin_id = ? AND seq = ?",
+                           (record["origin_id"], record["seq"])).fetchone()
+        if row and not row["is_dead"]:
+            self._create_tombstone(conn, record["origin_id"], record["seq"], "delivered")
 
     def _merge_message(self, conn, record, me):
         mine = me.lower() in (record["sender"].lower(), record["receiver"].lower())

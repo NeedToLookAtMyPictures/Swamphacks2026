@@ -60,17 +60,17 @@ class DatabaseTest(unittest.TestCase):
     def test_delivered_tombstone_kills_message_everywhere(self):
         msg = self.alice.add_message("bob", "hi")
         self.carol.merge(self.alice.export())   # carol relays it
-        self.bob.merge(self.carol.export())     # bob receives it
-        self.bob.mark_delivered(msg["origin_id"], msg["seq"])
+        self.assertFalse(self.carol.get("messages", "d-alice", 1)["is_dead"])  # relaying isn't delivery
+        self.bob.merge(self.carol.export())     # bob receives it: delivered automatically
         self.assertTrue(self.bob.get("messages", "d-alice", 1)["is_dead"])
+        self.assertEqual([t["reason"] for t in self.bob.list("tombstones")], ["delivered"])
 
         self.carol.merge(self.bob.export())
         self.assertTrue(self.carol.get("messages", "d-alice", 1)["is_dead"])
 
     def test_dead_message_is_not_picked_up(self):
         msg = self.alice.add_message("bob", "hi")
-        self.bob.merge(self.alice.export())
-        self.bob.mark_delivered(msg["origin_id"], msg["seq"])
+        self.bob.merge(self.alice.export())     # delivered on arrival
         # carol never had the message, so she doesn't save it, but keeps the tombstone
         self.carol.merge(self.bob.export())
         self.assertIsNone(self.carol.get("messages", "d-alice", 1))
@@ -94,9 +94,8 @@ class DatabaseTest(unittest.TestCase):
         msg = self.alice.add_message("dave", "are you out there?")
         self.carol.merge(self.alice.export())
         dave = make_db(self.tmp.name, "dave", "d-dave")
-        dave.merge(self.carol.export())
+        dave.merge(self.carol.export())         # delivered on arrival
         self.assertEqual(dave.get("messages", "d-alice", msg["seq"])["receiver"], "dave")
-        dave.mark_delivered("d-alice", msg["seq"])
         self.alice.merge(dave.export())
         self.assertTrue(self.alice.get("messages", "d-alice", msg["seq"])["is_dead"])
 
@@ -105,7 +104,10 @@ class DatabaseTest(unittest.TestCase):
         self.bob.merge(self.alice.export())
         self.carol.merge(self.bob.export())
         for db in (self.bob, self.carol):
-            self.assertEqual(db.get("messages", "d-alice", msg["seq"])["receiver"], "*")
+            message = db.get("messages", "d-alice", msg["seq"])
+            self.assertEqual(message["receiver"], "*")
+            self.assertFalse(message["is_dead"])
+            self.assertEqual(db.list("tombstones"), [])
         self.assertNotIn("*", [c["name"] for c in self.carol.contacts()])
         with self.assertRaises(ValueError):
             self.alice.add_message("everyone!", "not a valid name")
@@ -113,7 +115,7 @@ class DatabaseTest(unittest.TestCase):
     def test_names_are_case_insensitive(self):
         msg = self.alice.add_message("BOB", "hi")
         self.bob.merge(self.alice.export())
-        self.bob.mark_delivered("d-alice", msg["seq"])
+        self.assertTrue(self.bob.get("messages", "d-alice", msg["seq"])["is_dead"])  # "BOB" is bob
         old = time.time() - MESSAGE_TTL - 10
         with self.bob._connect() as conn:  # bob keeps old messages addressed to him
             conn.execute("UPDATE messages SET time_created = ?", (old,))
@@ -198,7 +200,8 @@ class ApiTest(unittest.TestCase):
         incoming = {"messages": [dict(origin_id="d-bob", seq=1, time_created=time.time(),
                                       sender="bob", receiver="ALICE", content="yo")]}
         self.assertEqual(c.post("/api/sync", json=incoming).json["merged"]["messages"], 1)
-        self.assertEqual(c.post("/api/messages/d-bob/1/delivered").status_code, 201)
+        self.assertEqual(c.get("/api/messages/d-bob/1").json["is_dead"], 1)  # delivered on arrival
+        self.assertEqual(c.post("/api/messages/d-bob/1/delivered").status_code, 409)
         self.assertEqual(c.get("/api/messages/d-bob/1").json["is_dead"], 1)
 
         shared = c.get("/api/sync").json

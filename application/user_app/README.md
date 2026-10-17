@@ -55,6 +55,10 @@ Configuration issue:
 Every record this device creates gets `origin_id = device_id` and the next
 `seq`.
 
+When a message addressed to you arrives (through `POST /api/sync` / `merge()`),
+it is marked delivered automatically: your device creates a `delivered`
+tombstone, which spreads and kills the message on every other device.
+
 People are identified by their **name**, which is unique between people and
 can't be changed (1-32 letters, digits, `_` or `-`, compared ignoring case).
 Messages are addressed to a name, so you can send to someone you've

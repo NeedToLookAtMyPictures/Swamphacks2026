@@ -8,7 +8,7 @@ Device (this user, never shared)
 Records created on this device
     POST   /api/locales                     {location, name, comment?}
     POST   /api/messages                    {receiver, content}; receiver is a name, or "*" for everyone
-    POST   /api/messages/<origin>/<seq>/delivered   receiver marks a message delivered
+    POST   /api/messages/<origin>/<seq>/delivered   mark delivered by hand (normally automatic)
     PUT    /api/location                    {latitude, longitude} this user's position
 
 Reading
@@ -115,6 +115,8 @@ def mark_delivered(origin_id, seq):
         return jsonify(error="no such message"), 404
     if message["receiver"].lower() != db().get_device()["name"].lower():
         return jsonify(error="only the receiver can mark a message delivered"), 403
+    if message["is_dead"]:
+        return jsonify(error="message is already delivered or expired"), 409
     return jsonify(db().mark_delivered(origin_id, seq)), 201
 
 
