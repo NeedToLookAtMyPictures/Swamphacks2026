@@ -59,7 +59,8 @@ Nothing in the link or the protocol changes.
 3. Plug the board into the phone (USB-C, or an OTG adapter).
 
 **Running:** the same command as on a laptop, e.g.
-`python examples/run_node.py --name alice --demo`. What happens:
+`python examples/run_node.py --name alice --demo`, or the whole app with
+`python application/user_app/main.py --phone --mesh-demo`. What happens:
 
 1. `--port auto` picks the Termux transport.
 2. The program wasn't started by termux-usb, so the transport runs

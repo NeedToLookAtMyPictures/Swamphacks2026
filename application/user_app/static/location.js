@@ -3,7 +3,8 @@
 // Works offline: the browser's Geolocation API reads the device's GPS, which
 // needs no internet. (Devices without GPS, like most laptops, locate themselves
 // from Wi-Fi networks, which does need internet, so offline they may time out.)
-// Geolocation only runs on localhost or HTTPS.
+// Geolocation only runs on localhost or HTTPS, so when a phone opens the app
+// on another device (e.g. a Raspberry Pi over Bluetooth), start it with --https.
 
 const LOCATION_INTERVAL_MS = 60 * 1000;
 const LOCATION_OPTIONS = {
@@ -32,7 +33,8 @@ function reportLocation() {
 
 function startLocationUpdates() {
   if (!("geolocation" in navigator)) {
-    console.warn("geolocation is not available (needs localhost or HTTPS)");
+    console.warn("geolocation is not available: open the app over HTTPS " +
+                 "(python main.py --host 0.0.0.0 --https) or on localhost");
     return;
   }
   reportLocation();

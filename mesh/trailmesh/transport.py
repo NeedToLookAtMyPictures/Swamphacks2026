@@ -32,6 +32,10 @@ class TransportError(OSError):
     """The pipe failed or can't be opened (board unplugged, wrong port, no permission)."""
 
 
+class PortInUse(TransportError):
+    """The serial port is locked by another program."""
+
+
 class Transport(ABC):
     """A byte stream to the board. Implementations must be safe to read from one
     thread while another thread writes, and close() may be called from either."""
@@ -114,8 +118,17 @@ class PySerialTransport(Transport):
         self.port = port
         try:
             # serial_for_url takes a device name or a pyserial URL (socket://... in the tests).
-            self._ser = serial.serial_for_url(port, baud, timeout=0.05)
+            # exclusive=True locks the port: two programs reading one board steal each
+            # other's bytes and both see endless fake disconnects. With the lock, the
+            # second program gets a clear "in use" error instead. (Windows ports are
+            # always exclusive.)
+            self._ser = serial.serial_for_url(port, baud, timeout=0.05, exclusive=True)
         except (*self._errors, ValueError) as e:
+            if "lock" in str(e).lower():
+                raise PortInUse(
+                    f"{port} is already open in another program (another main.py / run_node.py / "
+                    f"diagnose.py, or a serial monitor). Close it first."
+                ) from e
             raise TransportError(f"can't open {port}: {e}") from e
 
     def _find_board(self) -> str:

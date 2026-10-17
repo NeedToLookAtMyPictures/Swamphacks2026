@@ -1,19 +1,21 @@
 """Global SQLite database: data set by the company and loaded from the server.
 
-Separate from the user's own database (database.py). It is set once, from the
-server at setup; users never change it. The only writer is load(), which
-replaces everything.
+Separate from the user's own database (database.py). The server keeps the
+master copy (server/server.py uses this same module) and sends it to devices
+when they sync and their copy is out of date; users never change it. The only
+writer is load(), which replaces everything.
 
 Global locales are fixed places such as water sources and campsites. Their `id`
 is what user locale records (reviews/comments) refer to in their `location`.
 Global trails are routes, sent as GPX, always drawn on the map.
 
-Usage (until the server exists, load a JSON file in the same format the server sends):
+Usage (load a JSON file in the format the server sends, e.g. for testing offline):
     python global_database.py load sample_global_locales.json
 """
 
 import argparse
 import contextlib
+import hashlib
 import json
 import math
 import sqlite3
@@ -22,7 +24,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 DEFAULT_GLOBAL_DB_PATH = Path(__file__).resolve().parent / "data" / "global.db"
-GLOBAL_SCHEMA_VERSION = 3
+GLOBAL_SCHEMA_VERSION = 4
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS global_locales (
@@ -41,10 +43,11 @@ CREATE TABLE IF NOT EXISTS global_trails (
     gpx         TEXT NOT NULL      -- the GPX document as sent by the server
 );
 
--- Exactly one row: when the global data was loaded
+-- Exactly one row: when the global data was loaded, and which data it is
 CREATE TABLE IF NOT EXISTS global_info (
     id        INTEGER PRIMARY KEY CHECK (id = 1),
-    loaded_at REAL  -- NULL until loaded from the server
+    loaded_at REAL,  -- NULL until loaded from the server
+    version   TEXT   -- hash of the content: equal on server and device when in sync
 );
 INSERT OR IGNORE INTO global_info (id) VALUES (1);
 """
@@ -146,7 +149,14 @@ class GlobalDatabase:
 
     def info(self):
         with self._connect() as conn:
-            return dict(conn.execute("SELECT loaded_at FROM global_info").fetchone())
+            return dict(conn.execute("SELECT loaded_at, version FROM global_info").fetchone())
+
+    def export(self):
+        """Everything, in the format load() takes (trails as GPX text), plus its version."""
+        with self._connect() as conn:
+            locales = [dict(r) for r in conn.execute("SELECT * FROM global_locales ORDER BY id")]
+            trails = [dict(r) for r in conn.execute("SELECT * FROM global_trails ORDER BY id")]
+        return {"version": self.info()["version"], "locales": locales, "trails": trails}
 
     # -- loading from the server --------------------------------------------------
 
@@ -164,6 +174,7 @@ class GlobalDatabase:
             raise ValueError("expected {locales: [...], trails: [...]}")
         locales = [self._clean(r) for r in data["locales"]]
         trails = [self._clean_trail(r) for r in data.get("trails", [])]
+        version = content_version(locales, trails)
         with self._connect() as conn:
             for table, columns, rows in (("global_locales", LOCALE_COLUMNS, locales),
                                          ("global_trails", TRAIL_COLUMNS, trails)):
@@ -171,7 +182,8 @@ class GlobalDatabase:
                 conn.executemany(
                     f"INSERT INTO {table} ({', '.join(columns)}) "
                     f"VALUES ({', '.join(':' + c for c in columns)})", rows)
-            conn.execute("UPDATE global_info SET loaded_at = ?", (time.time(),))
+            conn.execute("UPDATE global_info SET loaded_at = ?, version = ?",
+                         (time.time(), version))
         return {"locales": len(locales), "trails": len(trails)}
 
     # -- helpers -------------------------------------------------------------------
@@ -208,6 +220,14 @@ class GlobalDatabase:
             "description": str(record.get("description") or ""),
             "gpx": record["gpx"],
         }
+
+
+def content_version(locales, trails):
+    """A short hash of cleaned global data: the same data always gets the same
+    version, so a device can tell whether its copy matches the server's."""
+    data = {"locales": sorted(locales, key=lambda r: r["id"]),
+            "trails": sorted(trails, key=lambda r: r["id"])}
+    return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()[:16]
 
 
 def read_load_file(path):

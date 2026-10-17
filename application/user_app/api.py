@@ -2,7 +2,9 @@
 
 Device (this user, never shared)
     GET    /api/device                      this device's info
-    POST   /api/device                      create identity {name, device_id?}; name must be unique
+    POST   /api/device                      create identity {name}; needs the server (internet or
+                                            its wifi), which reserves the name, then syncs once
+    GET    /api/server                      which server this device syncs with, and when it last did
     PATCH  /api/device                      update mutable fields {last_server_sync}
 
 Records created on this device
@@ -25,18 +27,23 @@ Global data (set by the company, loaded once from the server; users can't change
     GET    /api/global/categories           each category with its count
     GET    /api/global/trails               trails with their lines parsed from GPX
     GET    /api/global/trails/<id>.gpx      a trail's original GPX file
-    GET    /api/global/info                 {loaded_at}
+    GET    /api/global/info                 {loaded_at, version}
+    GET    /api/map/info                    the offline map {name, bbox, center, zooms, version}
     GET    /api/distances?from=&to=         walking distance along the global trails to global
                                             locales; from a locale id or "lat,lon" (default:
                                             this user's position), to a locale id (default: all)
-    POST   /api/global/load                 from the server: {locales, trails}; replaces everything
+    POST   /api/global/load                 {locales, trails}; replaces everything (normally the
+                                            server sends it during sync instead)
 """
 
+import json
 import sqlite3
 
 from flask import Blueprint, Response, current_app, jsonify, request
 
-from database import SHARED_TABLES, DeviceNotInitialized
+import server_sync
+from database import SHARED_TABLES, DeviceNotInitialized, check_name
+from download_locales import DEFAULT_BBOX, MAP_FILE, MAP_INFO_FILE
 from trail_distance import TrailNetwork
 
 api = Blueprint("api", __name__, url_prefix="/api")
@@ -46,6 +53,15 @@ IMMUTABLE_DEVICE_FIELDS = {"device_id", "name", "time_created", "next_seq"}
 
 def db():
     return current_app.config["DATABASE"]
+
+
+@api.after_request
+def sync_soon(response):
+    """Anything written here (a message, a comment, a position) goes to the server now
+    rather than at the next scheduled sync, so the other person sees it sooner."""
+    if request.method != "GET" and response.status_code < 400:
+        server_sync.wake()
+    return response
 
 
 def global_db():
@@ -107,8 +123,40 @@ def init_device():
     if db().get_device() is not None:
         return jsonify(error="device already initialized; its identity is immutable"), 409
     data = body("name")
-    device = db().init_device(data["name"], data.get("device_id"))
-    return jsonify(device), 201
+    check_name(data["name"])
+    # Only the server can guarantee the name is unique, so an account can only be
+    # made while one can be reached: over the internet (--server) or on its wifi
+    finder = current_app.config.get("SERVER")
+    server_url = finder.find() if finder else None
+    if server_url is None:
+        return jsonify(error="can't reach the server to reserve your name; connect to "
+                             "the internet or to the server's wifi and try again"), 503
+    try:
+        reserved = server_sync.register(server_url, data["name"], data.get("device_id"))
+    except server_sync.ServerError as exc:
+        return jsonify(error=f"server refused the name: {exc}"), 409
+    except OSError:
+        return jsonify(error="lost the server while reserving your name; try again"), 503
+    db().init_device(reserved["name"], reserved["device_id"])
+    # First sync right away, so the new account starts with everyone's data
+    # and the server's global data (water sources, campsites, trails)
+    try:
+        server_sync.sync_once(db(), server_url, global_db())
+    except (OSError, server_sync.ServerError, ValueError):
+        pass  # the background sync will catch up
+    return jsonify(db().get_device()), 201
+
+
+@api.get("/server")
+def server_status():
+    """Which server this device syncs with, and when it last did."""
+    finder = current_app.config.get("SERVER")
+    device = db().get_device()
+    current = finder.current if finder else None
+    return jsonify(looking_for=finder.describe() if finder else "nothing (offline only)",
+                   url=current[0] if current else None,
+                   via=current[1] if current else None,
+                   last_server_sync=device["last_server_sync"] if device else None)
 
 
 @api.patch("/device")
@@ -221,6 +269,28 @@ def global_trail_gpx(trail_id):
 @api.get("/global/info")
 def global_info():
     return jsonify(global_db().info())
+
+
+def load_map_info():
+    """The offline map's name, bounds and zoom levels, or the defaults when there's no map.
+
+    version is set for a map from the server; the page reloads the map when it changes."""
+    if MAP_FILE.exists() and MAP_INFO_FILE.exists():
+        return {"version": None, **json.loads(MAP_INFO_FILE.read_text())}
+    min_lon, min_lat, max_lon, max_lat = DEFAULT_BBOX
+    return {
+        "name": None,
+        "bbox": DEFAULT_BBOX,
+        "center": [(min_lat + max_lat) / 2, (min_lon + max_lon) / 2],
+        "min_zoom": 8,
+        "max_zoom": 15,
+        "version": None,
+    }
+
+
+@api.get("/map/info")
+def map_info():
+    return jsonify(load_map_info())
 
 
 @api.post("/global/load")

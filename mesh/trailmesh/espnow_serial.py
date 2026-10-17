@@ -25,7 +25,7 @@ import struct
 import threading
 
 from .link import Link, RxFrame
-from .transport import Transport, TransportError, open_transport
+from .transport import PortInUse, Transport, TransportError, open_transport
 
 BROADCAST = b"\xff" * 6
 
@@ -158,6 +158,7 @@ class EspNowSerialLink(Link):
 
     def _read_loop(self) -> None:
         dec = SlipDecoder()
+        busy_reported = False
         while not self._stop.is_set():
             t = self._transport
             if t is None:
@@ -170,8 +171,14 @@ class EspNowSerialLink(Link):
                     self._open()
                     dec = SlipDecoder()
                     self._emit(f"[link] reconnected to board on {self.port}")
+                except PortInUse as e:
+                    if not busy_reported:
+                        self._emit(f"[link] {e}")
+                        busy_reported = True
                 except TransportError:
                     pass  # still unplugged
+                else:
+                    busy_reported = False
                 continue
             try:
                 data = t.read(512)
