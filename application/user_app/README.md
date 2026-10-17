@@ -131,4 +131,5 @@ Tests: `python -m unittest test_database`
 - **Map**: offline Leaflet map. The gear button opens Settings:
   - **Last known location**: search people and check who to pin, with their name and when they were last seen
   - **Locales**: the global locales (shown by default), grouped by category; show or hide a whole category or single locales, with search
+  - Clicking a global locale opens a sheet over the bottom of the map with information about the site (description, coordinates, distance from your last location, comment count) and its comments, newest first, with a box to add one. Comments are user `locales` records with `location` set to the site's id, so they sync like other records
 - **Debug**: shows every table in the local and global databases (refresh button; offers to create the device if it has no identity yet)

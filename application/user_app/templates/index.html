@@ -44,6 +44,25 @@
       <div class="notice">No offline map downloaded. Run <code>python download_locales.py map</code>.</div>
       {% endif %}
       <div id="leaflet-map"></div>
+      <div id="locale-sheet" hidden>
+        <div class="locale-sheet-top">
+          <div id="locale-sheet-head"></div>
+          <button id="locale-sheet-close" type="button" aria-label="Close">&times;</button>
+        </div>
+        <div class="locale-sheet-body">
+          <div id="locale-info"></div>
+          <h3>Comments</h3>
+          <form id="locale-comment-form">
+            <textarea id="locale-comment-text" rows="2" placeholder="Add a comment about this site" required></textarea>
+            <div class="compose-row">
+              <span id="locale-comment-status"></span>
+              <button>Post</button>
+            </div>
+          </form>
+          <p id="locale-comment-setup" class="locale-note" hidden>Set up this device (Debug tab) to add comments.</p>
+          <div id="locale-comments"></div>
+        </div>
+      </div>
       <div id="map-settings">
         <button id="map-settings-toggle" type="button" title="Map settings" aria-label="Map settings">&#9881;</button>
         <div id="map-settings-panel" hidden>
@@ -93,6 +112,7 @@
   <script src="{{ url_for('static', filename='debug.js') }}"></script>
   <script src="{{ url_for('static', filename='map-settings.js') }}"></script>
   <script src="{{ url_for('static', filename='global-locales.js') }}"></script>
+  <script src="{{ url_for('static', filename='locale-sheet.js') }}"></script>
   <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
 </html>

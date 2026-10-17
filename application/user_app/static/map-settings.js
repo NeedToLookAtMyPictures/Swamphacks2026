@@ -128,6 +128,7 @@ function initMapSettings() {
     b.addEventListener("click", () => showSettingsView(b.dataset.open)));
   document.getElementById("last-known-search").addEventListener("input", renderLastKnownList);
   initGlobalLocales();
+  initLocaleSheet();
 
   // Keep the map from panning/zooming when interacting with the menu
   const container = document.getElementById("map-settings");

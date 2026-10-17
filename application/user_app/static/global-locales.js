@@ -25,17 +25,10 @@ function categoryLabel(category) {
 
 async function loadGlobalLocales() {
   globalLocales = await fetch("/api/global/locales").then((r) => r.json());
+  // Close the sheet if its locale is gone, e.g. after the global data was reloaded
+  if (sheetLocale && !globalLocales.some((l) => l.id === sheetLocale.id)) closeLocaleSheet();
   drawGlobalLocales();
   renderGlobalLocalesList();
-}
-
-// What happens when a locale is clicked; placeholder for now
-function onGlobalLocaleClick(locale, marker) {
-  const popup = settingsEl("div");
-  popup.appendChild(settingsEl("strong", locale.name));
-  popup.appendChild(settingsEl("div", categoryLabel(locale.category)));
-  if (locale.description) popup.appendChild(settingsEl("div", locale.description));
-  marker.bindPopup(popup).openPopup();
 }
 
 function drawGlobalLocales() {
@@ -44,11 +37,17 @@ function drawGlobalLocales() {
     .filter((l) => !hiddenLocales.has(l.id))
     .map((l) => {
       const color = categoryColor(l.category);
+      const selected = sheetLocale && sheetLocale.id === l.id;
       const marker = L.circleMarker([l.latitude, l.longitude], {
-        radius: 8, color: "#fff", weight: 2, fillColor: color, fillOpacity: 1,
+        radius: selected ? 11 : 8, color: selected ? "#222" : "#fff", weight: selected ? 3 : 2,
+        fillColor: color, fillOpacity: 1,
       }).bindTooltip(l.name, { direction: "top", offset: [0, -8] });
       marker.on("mouseover", () => marker.bringToFront());
-      marker.on("click", () => onGlobalLocaleClick(l, marker));
+      marker.on("click", (e) => {
+        L.DomEvent.stopPropagation(e);  // a map click closes the sheet
+        openLocaleSheet(l);
+      });
+      if (selected) setTimeout(() => marker.bringToFront());
       return marker;
     })).addTo(map);
 }
