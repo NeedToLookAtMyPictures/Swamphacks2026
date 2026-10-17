@@ -9,7 +9,7 @@
 //
 //   LoRa (SX1262, sub-GHz): long range, slow. Every frame is a broadcast. Raw
 //     LoRa has no listen-before-talk, so before each send this sketch checks
-//     that no packet is arriving and runs channel activity detection (CAD).
+//     that no packet is arriving (the receiver's preamble/header flags; see tryTransmit).
 //     Sends are queued, since a frame takes 0.1-1 s on air.
 //   ESP-NOW (the ESP32's 2.4 GHz Wi-Fi radio): ~60 m, fast. Same code as
 //     firmware/espnow_bridge. Python turns it on only for an exchange with a
@@ -283,7 +283,11 @@ static bool loraInit() {
 
 static void startRx() {
   dio1Flag = false;
-  int16_t err = radio.startReceive();
+  // Also latch "preamble detected", so tryTransmit can see a packet starting to arrive
+  // without leaving receive mode. Only RX_DONE drives the DIO1 interrupt, as by default.
+  int16_t err = radio.startReceive(RADIOLIB_SX126X_RX_TIMEOUT_INF,
+                                   RADIOLIB_IRQ_RX_DEFAULT_FLAGS | (1UL << RADIOLIB_IRQ_PREAMBLE_DETECTED),
+                                   RADIOLIB_IRQ_RX_DEFAULT_MASK, 0);
   if (err != RADIOLIB_ERR_NONE) loraFail(err, "startReceive");
   lstate = L_RX;
 }
@@ -339,16 +343,29 @@ static void defer() {
 }
 
 // Listen before talk, then start sending the next queued frame.
+//
+// The receiver itself is the carrier sense: it's always in continuous receive and
+// latches PREAMBLE_DETECTED / HEADER_VALID as a packet starts to arrive. Checking those
+// flags never leaves receive mode. (Channel activity detection did, which aborted a
+// packet whose preamble had begun but whose header hadn't arrived yet: the packet was
+// lost every time two boards transmitted close together.)
 static void tryTransmit() {
+  static uint32_t preambleSince = 0;  // when we first saw an arriving packet's preamble, 0 = not seen
   if (deferralsInARow < MAX_DEFERRALS) {
-    // A packet is arriving right now: sending would wreck it (and we'd miss it).
+    const uint32_t arriving = RADIOLIB_SX126X_IRQ_PREAMBLE_DETECTED | RADIOLIB_SX126X_IRQ_HEADER_VALID;
     uint32_t irq = radio.getIrqFlags();
-    if ((irq & RADIOLIB_SX126X_IRQ_HEADER_VALID) && !(irq & RADIOLIB_SX126X_IRQ_RX_DONE)) { defer(); return; }
-    // Someone else's preamble is on the air.
-    int16_t cad = radio.scanChannel();  // a few symbols long; leaves the radio in standby
-    dio1Flag = false;  // the CAD-done interrupt isn't a received packet
-    if (cad == RADIOLIB_PREAMBLE_DETECTED || cad == RADIOLIB_LORA_DETECTED) { startRx(); defer(); return; }
+    bool stale = false;
+    if (irq & RADIOLIB_SX126X_IRQ_HEADER_ERR) {
+      stale = true;  // that packet ended with a bad header (no RX_DONE, so no interrupt): it's over
+    } else if ((irq & arriving) && !(irq & RADIOLIB_SX126X_IRQ_RX_DONE)) {
+      if (preambleSince == 0) preambleSince = millis();
+      // A packet lasts at most frameAirMs. Longer means noise looked like a preamble.
+      if (millis() - preambleSince <= frameAirMs + 20) { defer(); return; }
+      stale = true;
+    }
+    if (stale) radio.clearIrqFlags(arriving | RADIOLIB_SX126X_IRQ_HEADER_ERR);
   }
+  preambleSince = 0;
   deferralsInARow = 0;
   TxItem &item = txQueue[txHead];
   txHead = (txHead + 1) % TX_QUEUE_LEN;
