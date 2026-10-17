@@ -44,7 +44,7 @@ main thread:    Node.poll() -> link.poll() empties the queue without blocking
 
 | Call | Behaviour |
 |---|---|
-| `EspNowSerialLink(port, baud=460800, log=print)` | Opens the port, starts the reader thread, sends GET_INFO |
+| `EspNowSerialLink(port, baud=460800, log=print)` | Opens the port with `serial.serial_for_url`, starts the reader thread, sends GET_INFO. `port` is a device name (`COM3`, `/dev/ttyUSB0`) or a pyserial URL such as `socket://127.0.0.1:5000` (used by the tests) |
 | `.mac` | The board's own MAC, set once the INFO reply arrives (None until then) |
 | `send(payload, dest)` | Raises `ValueError` if the frame is over 250 bytes |
 | `poll()` | Empties the receive queue |

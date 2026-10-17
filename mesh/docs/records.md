@@ -60,9 +60,15 @@ All values are little-endian. The body has no length field; it runs to the end
 of the buffer. That works because the receiver reassembles the exact byte string
 first (see DATA chunks in [session.md](session.md)).
 
-`decode(data)` is the inverse. It does **not** validate anything (see Known
-gaps). The receiving session recomputes the id and checks that it equals the id
-it asked for, and that check is the integrity check.
+`decode(data)` is the inverse. It raises `struct.error` or `ValueError` on
+malformed bytes, and the session's DATA handler drops such records. The
+session then recomputes the id and checks that it equals the id it asked for,
+and that check is the integrity check.
+
+Records have no size limit of their own: a large record is split across many
+frames of at most 250 bytes (see [wire.md](wire.md)). The only field limit is
+the key, which must be ≤ 255 bytes because its length is one byte. `Record(...)`
+raises `ValueError` otherwise.
 
 ## Constructors
 
@@ -99,11 +105,4 @@ The replacement itself happens in the store; see [store.md](store.md).
 
 ## Known gaps
 
-- **`decode` can raise** (`struct.error`, or `ValueError` for an unknown kind) on
-  malformed bytes. The only caller is the session's DATA handler, so the
-  exception propagates out of `Node.poll()`. In practice it needs a buggy or
-  malicious peer, because the data arrives over a reliable channel and only for
-  ids we requested. The fix is a try/except around the decode in `session.py`.
-- **Keys longer than 255 bytes** make `encode` raise, because the length is
-  stored in one byte. Nothing enforces this when the record is created.
 - **No signatures.** Anyone can author a record with any `origin`.
