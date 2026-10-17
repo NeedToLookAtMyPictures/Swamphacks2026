@@ -75,10 +75,10 @@ class EspNowSerialLink(Link):
     def __init__(self, port: str, baud: int = 460800, log=print, reconnect_interval: float = 1.0):
         import serial  # pyserial; imported here so the simulator works without it
 
-        self._serial = serial
-        self.port = port
-        self.baud = baud
-        self.reconnect_interval = reconnect_interval
+        # serial_for_url takes a device name ("COM3", "/dev/ttyUSB0") or a pyserial
+        # URL such as "socket://127.0.0.1:5000", which the tests use for a fake ESP32.
+        self._ser = serial.serial_for_url(port, baud, timeout=0.05)
+        self._rx: queue.Queue[RxFrame] = queue.Queue()
         self._log = log
         self._lock = threading.RLock()
         self._ser = None

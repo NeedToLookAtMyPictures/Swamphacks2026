@@ -64,22 +64,34 @@ queue WANT frames, 29 ids each, FLAG_LAST on the last one (possibly empty)
 records = [store.get(id) for id in peer_wants], skipping ids we no longer have
 sort by (PRIORITY[kind], newest first)
 for each record: split encode() into 226-byte chunks, send DATA(id, i, count, chunk)
+    (skipped if it would need more than 65 535 chunks)
 then send DONE
 ```
+The session uses `mtu = min(link.mtu, 250)`, so every frame it builds (INV,
+WANT, DATA) fits in one ESP-NOW packet: 12 B header + 12 B DATA header +
+226 B chunk = 250 B.
+
 This is a **lazy generator**. Frames are created only as the send window frees
 up, so a large record doesn't fill memory with queued frames.
 
 ### Step 4: receiving DATA
 ```
 ignore unless record_id is in _wanted
+ignore if index >= count, or count differs from this record's first chunk
 store chunk[index]
 when all `count` chunks are present:
-    record = Record.decode(joined chunks)
-    if record.id != record_id: drop it        # integrity check
+    record = Record.decode(chunks 0..count-1 joined)   # malformed: drop it
+    if record.id != record_id: drop it                 # integrity check
     if store.put(record): count it and call on_record(record)
 ```
+The reliable layer already delivers DATA frames in order with nothing missing
+or duplicated. The chunk index and count are a second check that also covers a
+buggy or hostile peer. Because the id is a hash of the contents, a record is
+either stored complete and byte-identical or not at all.
+
 Each record is stored **as soon as its last chunk arrives**, not at the end of
-the session. Records that only partially arrived are discarded when the session ends.
+the session. Records that only partially arrived are discarded when the session
+ends, and the next session resends them from the first chunk.
 
 ### Step 5: finishing
 - Receiving the peer's DONE sets `peer_done`.
@@ -139,7 +151,6 @@ retransmitting DONE to a peer that has already finished. Two things cover it:
 ## Assumptions
 
 - **One session per peer pair at a time.** The Node enforces this.
-- **The peer follows the protocol.** Chunk indexes are trusted (see Known gaps).
 - **Records requested in WANT stay available until sent.** If one is replaced
   mid-session, it's skipped silently. The peer still ends correctly, because
   DONE follows.
@@ -149,10 +160,8 @@ retransmitting DONE to a peer that has already finished. Two things cover it:
 
 ## Known gaps
 
-- **Malformed DATA can crash the loop.** `Record.decode` raising, or a peer
-  sending `chunk_index >= chunk_count` (a `KeyError` in the join), propagates
-  out of `on_frame`, then `Node._on_rx`, then `Node.poll()`. Wrapping the
-  decode in a try/except, and ignoring indexes `>= count`, would fix it.
+- **No resume within a record.** If a session drops at chunk 4 000 of 4 425,
+  the next session starts that record again from chunk 0.
 - **There's no maximum session length.** If the peer stays in range, a huge record
   keeps the radio on until it finishes.
 - **`records_sent` counts queued records,** so it can overstate what the peer

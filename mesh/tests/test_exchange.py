@@ -7,7 +7,9 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from trailmesh import Config, Kind, Node, Record, RecordStore  # noqa: E402
+from trailmesh.session import Session  # noqa: E402
 from trailmesh.sim import SimClock, SimMedium, run  # noqa: E402
+from trailmesh.wire import DATA_HDR, MAX_FRAME, Frame, T  # noqa: E402
 
 FAST = dict(always_on=True)
 
@@ -42,6 +44,43 @@ class ExchangeTests(unittest.TestCase):
         a.post(big)
         run([a, b], self.clock, 60, until=lambda: b.store.has(big.id))
         self.assertEqual(b.store.get(big.id).body, big.body)
+
+    def test_1mb_record_is_split_into_250_byte_frames(self):
+        m = SimMedium(self.clock)
+        # The link would accept 1500-byte frames; the session must still cap them at 250.
+        a = make(m, self.clock, 1, "a", **FAST)
+        b = make(m, self.clock, 2, "b", **FAST)
+        a.link.mtu = b.link.mtu = 1500
+        sizes = []
+        for n in (a, b):
+            send = n.link.send
+            n.link.send = lambda payload, *args, _send=send: (sizes.append(len(payload)), _send(payload, *args))[1]
+        big = Record(Kind.MESSAGE, 1, self.t0, random.Random(0).randbytes(1_000_000))
+        a.post(big)
+        run([a, b], self.clock, 600, until=lambda: b.store.has(big.id))
+        self.assertEqual(b.store.get(big.id).body, big.body)
+        self.assertLessEqual(max(sizes), MAX_FRAME)
+        self.assertGreater(len(sizes), 1_000_000 // MAX_FRAME)
+
+    def test_malformed_chunks_are_dropped(self):
+        rid = b"\x01" * 8
+        s = Session(my_id=2, peer_id=1, session_id=7, initiator=False, store=RecordStore(),
+                    config=Config(**FAST), mtu=250, send=lambda f: None, now=0, peer_sync=0)
+        s._wanted = {rid}
+        bad = [
+            DATA_HDR.pack(rid, 5, 2) + b"x",  # index past the count
+            DATA_HDR.pack(rid, 0, 3) + b"x",  # count disagrees with the next frame
+            DATA_HDR.pack(rid, 1, 2) + b"x",
+            DATA_HDR.pack(rid, 0, 2) + b"\x00",  # completes the record, but it doesn't decode
+        ]
+        for seq, payload in enumerate(bad):
+            s.on_frame(Frame(1, T.DATA, session=7, seq=seq, payload=payload), now=0)
+        self.assertEqual(s.records_received, 0)
+        self.assertFalse(s.finished)
+
+    def test_key_over_255_bytes_is_rejected(self):
+        with self.assertRaises(ValueError):
+            Record(Kind.LOCALE_UPDATE, 1, self.t0, b"dry", b"k" * 256)
 
     def test_gossip_carries_data_across_hops(self):
         m = SimMedium(self.clock)

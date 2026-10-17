@@ -44,9 +44,7 @@ main thread:    Node.poll() -> link.poll() empties the queue without blocking
 
 | Call | Behaviour |
 |---|---|
-| `EspNowSerialLink(port, baud=460800, log=print, reconnect_interval=1.0)` | Opens the port (raises if it doesn't exist **at startup**), starts the reader thread, **clears the partner filter, turns the radio on**, sends GET_INFO |
-| `.connected` | False while the board is unplugged |
-| `.dropped_writes` | Frames discarded while unplugged |
+| `EspNowSerialLink(port, baud=460800, log=print)` | Opens the port with `serial.serial_for_url`, starts the reader thread, sends GET_INFO. `port` is a device name (`COM3`, `/dev/ttyUSB0`) or a pyserial URL such as `socket://127.0.0.1:5000` (used by the tests) |
 | `.mac` | The board's own MAC, set once the INFO reply arrives (None until then) |
 | `.status` | Dict from the latest INFO: `radio_on, channel, last_err, tx_ok, tx_err, rx, rx_filtered, rx_dropped`. None until a reply arrives, or if the firmware is older. |
 | `request_status()` | Sends GET_INFO; `.mac` and `.status` update when the reply arrives |

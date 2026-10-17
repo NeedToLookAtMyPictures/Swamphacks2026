@@ -18,6 +18,9 @@ All of these use `SimMedium` (see [sim.md](sim.md)). Most run in demo mode
 |---|---|---|---|
 | `test_two_nodes_converge` | A has a locale update and a message, B has a pin | Both end up with the same 3 records. Data flows in both directions in one session. | |
 | `test_large_record_is_chunked_over_lossy_link` | 20 KB message, **30% loss** | Chunking, reassembly, ACK/retransmit recovery; the bytes arrive identical | Real-world speed |
+| `test_1mb_record_is_split_into_250_byte_frames` | 1 MB record; the links would accept 1500-byte frames | The record arrives byte-identical, and **no frame exceeds 250 bytes** even though the link would allow it | |
+| `test_malformed_chunks_are_dropped` | DATA frames with an index past the count, a changing count, and a record that doesn't decode | Each is dropped without raising; nothing is stored | |
+| `test_key_over_255_bytes_is_rejected` | A 256-byte key | `Record` raises `ValueError` | |
 | `test_gossip_carries_data_across_hops` | A–B in range, then only B–C | C gets A's record even though A and C never met. **This is the core gossip claim.** | |
 | `test_cutoff_skips_records_both_got_from_server` | One record with server_time before the cutoff, one after (both *created* before it) | The pre-cutoff one is skipped. The one **created** before the cutoff but **uploaded** after it is still sent. (See [store.md](store.md).) | |
 | `test_newer_locale_update_supersedes_older` | B has "flowing", A has a newer "dry" for the same `spring:water` key | Both devices end up with only "dry" | Keeping history (not implemented) |
@@ -37,7 +40,7 @@ Skipped if `pyserial` isn't installed.
 | Test | Proves |
 |---|---|
 | `test_slip_roundtrip_with_escapes` | SLIP encode/decode handles `0xC0` and `0xDB` inside messages |
-| `test_two_nodes_over_serial` | Two `EspNowSerialLink`s on Linux pseudo-terminals, each talking to a fake ESP32 written in Python, sync a locale update and a 5 KB locale update. This exercises the real serial framing, reader thread, command encoding and GET_INFO. |
+| `test_two_nodes_over_serial` | Two `EspNowSerialLink`s, each talking to a fake ESP32 written in Python, sync a small locale update and a 5 KB one. The 5 KB record is split into ~23 frames, and the fake checks that every frame handed to the radio is ≤ 250 bytes. This exercises the real serial framing, reader thread, command encoding and GET_INFO. Each fake board is a local TCP server reached through pyserial's `socket://` URL, so the test runs on Windows, macOS and Linux. |
 
 The fake ESP32 (`FakeEsp32Pair`) copies the firmware's documented behaviour:
 SEND delivers to the other board when the MAC matches (or on broadcast), and

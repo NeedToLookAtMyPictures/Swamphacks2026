@@ -39,6 +39,28 @@ covers every frame.
 `RELIABLE = {INV, WANT, DATA, DONE}`. These get sequence numbers, ACKs and
 retransmission (see [reliable.md](reliable.md)).
 
+## Size limit: no frame over 250 bytes
+
+ESP-NOW carries at most 250 bytes per packet, so `MAX_FRAME = 250`. The
+session caps its frame size at `min(link.mtu, MAX_FRAME)`. Even a link that
+reports a bigger MTU never gets a frame over 250 bytes, header included.
+
+Records themselves can be any size. A record bigger than one frame is split
+into chunks, each sent as its own DATA frame:
+
+```
+DATA frame = 12 B header | record_id 8B | chunk_index u16 | chunk_count u16 | up to 226 B of the record
+```
+
+A 1 MB record becomes 4 425 frames of at most 250 bytes. Two sequence numbers
+make the reassembly lossless:
+- the **frame `seq`** (reliable layer) detects lost frames, triggers
+  retransmission and hands frames to the session in order
+  ([reliable.md](reliable.md));
+- the **`chunk_index`** places each chunk in its record. The record is rebuilt
+  only once all `chunk_count` chunks are present, and its hash id is checked
+  ([session.md](session.md)).
+
 ## Capacity per frame (ESP-NOW, mtu = 250)
 
 | Item | Per frame |
@@ -51,8 +73,9 @@ With a smaller LoRa MTU, all of these shrink automatically, because
 `session.py` computes them from `link.mtu`.
 
 Limits that follow from the field sizes:
-- A record can have at most 65 535 chunks. At 226 B per chunk that's about
-  14.8 MB per record.
+- A record can have at most 65 535 chunks (`MAX_CHUNKS`). At 226 B per chunk
+  that's about 14.8 MB per record. The sender skips a larger record rather
+  than crash.
 - `seq` is a u32, so it will never wrap within a session.
 
 ## `Frame` API
