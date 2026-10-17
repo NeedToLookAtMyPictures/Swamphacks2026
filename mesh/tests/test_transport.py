@@ -151,6 +151,23 @@ class Selection(unittest.TestCase):
             self.assertEqual(transport.open_transport("socket://127.0.0.1:5000", 460800), ("pyserial", "socket://127.0.0.1:5000"))
             self.assertEqual(transport.open_transport("auto", 460800), ("pyserial", "auto"))
 
+    def find_board(self, *ports):
+        found = [mock.Mock(device=dev, vid=vid) for dev, vid in ports]
+        with mock.patch("serial.tools.list_ports.comports", return_value=found):
+            return transport.PySerialTransport._find_board(None)
+
+    def test_auto_finds_board(self):
+        self.assertEqual(self.find_board(("/dev/ttyACM0", 0x303A)), "/dev/ttyACM0")
+        # a DevKit behind a CP210x / CH340 bridge (/dev/ttyUSB0 on Linux)
+        self.assertEqual(self.find_board(("/dev/ttyUSB0", 0x10C4)), "/dev/ttyUSB0")
+        self.assertEqual(self.find_board(("/dev/ttyUSB0", 0x1A86)), "/dev/ttyUSB0")
+        # a native-USB board wins over an unrelated bridge chip
+        self.assertEqual(self.find_board(("/dev/ttyUSB0", 0x0403), ("/dev/ttyACM0", 0x303A)), "/dev/ttyACM0")
+        with self.assertRaises(transport.TransportError):
+            self.find_board(("/dev/ttyS0", None))
+        with self.assertRaises(transport.TransportError):
+            self.find_board(("/dev/ttyUSB0", 0x10C4), ("/dev/ttyUSB1", 0x1A86))
+
 
 def interface(num, cls, n_eps):
     return bytes([9, 4, num, 0, n_eps, cls, 0, 0, 0])
