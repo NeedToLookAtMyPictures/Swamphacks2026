@@ -36,7 +36,27 @@ python download_locales.py map --source some-local-file.pmtiles
 ```bash
 python main.py                       # http://127.0.0.1:5000
 python main.py --host 0.0.0.0        # reachable from other devices on the LAN
+python main.py --host 0.0.0.0 --https   # same, over HTTPS (needed for GPS, see below)
 ```
+
+### Raspberry Pi + phone over Bluetooth
+
+When the app runs on a Raspberry Pi and a phone opens it in its browser over a
+Bluetooth network connection, the position comes from the **phone's** GPS
+through the browser. Browsers only allow that on `localhost` or HTTPS, so run
+the Pi with `--https`:
+
+```bash
+python main.py --host 0.0.0.0 --https
+```
+
+Then on the phone open `https://<pi-ip>:5000` (`hostname -I` on the Pi shows
+its IPs). The first run creates a self-signed certificate in `data/cert.pem` /
+`data/key.pem` (needs the `openssl` command, preinstalled on Raspberry Pi OS).
+There's no internet to get a real certificate, so the phone warns that the
+connection isn't private: tap **Advanced → Proceed** once, then allow location
+when asked. The certificate is kept, so it's only accepted once per phone;
+delete the two files to make a new one (for example if the Pi's name changed).
 
 ## Database
 
@@ -155,7 +175,7 @@ the browser once a minute and saves it with `PUT /api/location`. This works
 offline on devices with GPS (phones); laptops without GPS usually need internet
 to locate themselves. Browsers only allow geolocation on `localhost` or HTTPS,
 so opening the app from another device over plain `http://<lan-ip>` won't report
-a position. Updates pause while the tab is hidden or the phone is locked.
+a position; start the server with `--https` for that (see Raspberry Pi above). Updates pause while the tab is hidden or the phone is locked.
 
 ## Tabs
 
