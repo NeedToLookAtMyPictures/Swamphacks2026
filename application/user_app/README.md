@@ -38,6 +38,48 @@ python main.py                       # http://127.0.0.1:5000
 python main.py --host 0.0.0.0        # reachable from other devices on the LAN
 ```
 
+## Database
+
+`database.py` keeps a local SQLite database at `data/user.db` (git-ignored),
+created automatically on first run. The tables follow the Database
+Configuration issue:
+
+| Table | Shared | Key | Notes |
+|---|---|---|---|
+| `locales` | yes | (origin_id, seq) | location reviews/comments |
+| `messages` | yes | (origin_id, seq) | dead after 31 days or once delivered |
+| `geolocations` | yes | user | newest position wins; ties go to the higher device ID |
+| `tombstones` | yes | (origin_id, seq) | kills the target message; deleted after 31 days |
+| `device_info` | **no** | single row | `device_id`, `user_id`, `name` are immutable; `next_seq`, `last_server_sync` |
+
+Every record this device creates gets `origin_id = device_id` and the next
+`seq`. Expired messages are deleted, except on the sender's and receiver's
+devices, where they're kept (marked dead) but no longer shared.
+
+### API
+
+All endpoints take and return JSON. Full list in `api.py`.
+
+| Method | Path | What it does |
+|---|---|---|
+| GET | `/api/device` | this device's info |
+| POST | `/api/device` | create identity once: `{name, user_id?, device_id?}` (IDs are generated if left out) |
+| PATCH | `/api/device` | update mutable fields: `{last_server_sync}` |
+| POST | `/api/locales` | `{location, name, comment?}` |
+| POST | `/api/messages` | `{receiver, content}` |
+| POST | `/api/messages/<origin_id>/<seq>/delivered` | receiver marks a message delivered (creates a tombstone) |
+| PUT | `/api/location` | `{latitude, longitude}`: this user's current position |
+| GET | `/api/<table>?since=<time>` | list `locales`, `messages`, `geolocations` or `tombstones` |
+| GET | `/api/<table>/<origin_id>/<seq>` | one record |
+| GET | `/api/sync?since=<time>` | everything this device shares (for another device or the server) |
+| POST | `/api/sync` | merge records from another device or the server: `{locales: [...], messages: [...], ...}` |
+
+```bash
+curl -X POST localhost:5000/api/device -H 'content-type: application/json' -d '{"name": "Jordan"}'
+```
+
+Tests: `python -m unittest test_database`
+
 ## Tabs
 
 - **Messages**: blank for now

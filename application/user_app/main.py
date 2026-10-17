@@ -10,6 +10,8 @@ import json
 
 from flask import Flask, render_template, send_file
 
+from api import api
+from database import Database
 from download_locales import DEFAULT_BBOX, MAP_FILE, MAP_INFO_FILE
 
 
@@ -18,6 +20,8 @@ from download_locales import DEFAULT_BBOX, MAP_FILE, MAP_INFO_FILE
 # ---------------------------------------------------------------------------
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
+app.config["DATABASE"] = Database()
+app.register_blueprint(api)
 
 
 def load_map_info():
@@ -47,6 +51,7 @@ def map_file():
 def run(args):
     if not MAP_FILE.exists():
         print("No offline map found. Run `python download_locales.py map` first.")
+    app.config["DATABASE"].purge()
     app.run(host=args.host, port=args.port, debug=args.debug)
 
 
