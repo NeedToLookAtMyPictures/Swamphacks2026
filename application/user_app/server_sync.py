@@ -29,6 +29,14 @@ TIMEOUT = 15       # seconds, for a sync
 PING_TIMEOUT = 3   # seconds, for checking whether a server is there
 MAP_TIMEOUT = 120  # seconds without data before giving up on a map download
 
+HEADERS = {
+    # Cloudflare (in front of the public server) turns away urllib's default
+    # "Python-urllib/3.x" with a 403, though browsers get through
+    "user-agent": "trailmesh-app/1.0",
+    # free ngrok tunnels show browsers a warning page first
+    "ngrok-skip-browser-warning": "1",
+}
+
 # Set to sync right away instead of at the next SYNC_EVERY, e.g. after sending a message
 _wake = threading.Event()
 
@@ -46,9 +54,7 @@ def call(server_url, path, payload=None, timeout=TIMEOUT):
     """GET path, or POST payload to it as JSON. Returns the JSON answer."""
     data = None if payload is None else json.dumps(payload).encode()
     request = urllib.request.Request(server_url.rstrip("/") + path, data=data,
-                                     # free ngrok tunnels show browsers a warning page first
-                                     headers={"content-type": "application/json",
-                                              "ngrok-skip-browser-warning": "1"})
+                                     headers=dict(HEADERS, **{"content-type": "application/json"}))
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             return json.load(response)
@@ -63,8 +69,7 @@ def call(server_url, path, payload=None, timeout=TIMEOUT):
 def download(server_url, path, dest, timeout=MAP_TIMEOUT):
     """Save the file at path to dest. Returns its SHA-256."""
     digest = hashlib.sha256()
-    request = urllib.request.Request(server_url.rstrip("/") + path,
-                                     headers={"ngrok-skip-browser-warning": "1"})
+    request = urllib.request.Request(server_url.rstrip("/") + path, headers=HEADERS)
     with urllib.request.urlopen(request, timeout=timeout) as response, open(dest, "wb") as out:
         for chunk in iter(lambda: response.read(1 << 16), b""):
             digest.update(chunk)
@@ -168,13 +173,15 @@ class ServerFinder:
         self.lan = lan
         self.lan_url = None  # last server found on the wifi, tried first next time
         self.current = None  # (url, "configured" or "wifi") after the last find()
+        self.errors = {}  # url -> why it didn't answer at the last find()
 
-    @staticmethod
-    def answers(url):
+    def answers(self, url):
         try:
             call(url, "/api/health", timeout=PING_TIMEOUT)
+            self.errors.pop(url, None)
             return True
-        except (OSError, ServerError, ValueError):
+        except (OSError, ServerError, ValueError) as exc:
+            self.errors[url] = getattr(exc, "reason", None) or exc
             return False
 
     def find(self):
@@ -210,6 +217,8 @@ class SyncLoop:
                 if not self.said_none:  # once, not every CHECK_EVERY
                     print(f"No server answers (tried {self.finder.describe()}); "
                           f"looking again every {CHECK_EVERY} seconds")
+                    for url, error in self.finder.errors.items():
+                        print(f"  {url}: {error}")
                     self.said_none = True
                 return CHECK_EVERY
             self.said_none = False
