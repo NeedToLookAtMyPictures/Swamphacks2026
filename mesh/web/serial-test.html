@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ESP-NOW modem test</title>
+<style>
+  :root {
+    --bg: #f3f6f4;
+    --panel: #ffffff;
+    --ink: #1c2a22;
+    --muted: #5d6e64;
+    --line: #d3ddd6;
+    --pine: #2f5d46;
+    --pine-ink: #ffffff;
+    --rx: #1f6f8b;
+    --tx: #2f5d46;
+    --err: #b3261e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --bg: #141a17;
+      --panel: #1c2420;
+      --ink: #e4ece7;
+      --muted: #94a59b;
+      --line: #2f3b35;
+      --pine: #6fb28f;
+      --pine-ink: #10261b;
+      --rx: #7cc4dd;
+      --tx: #8fd1ad;
+      --err: #f2867e;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 760px; margin: 0 auto; padding: 24px 16px; }
+  h1 { font-size: 1.4rem; margin: 0 0 4px; }
+  .status { color: var(--muted); margin: 0 0 20px; }
+  .status.on { color: var(--pine); font-weight: 600; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  button, input {
+    font: inherit;
+    border-radius: 6px;
+    border: 1px solid var(--line);
+    padding: 8px 14px;
+    background: var(--panel);
+    color: var(--ink);
+  }
+  button { cursor: pointer; }
+  button.primary { background: var(--pine); color: var(--pine-ink); border-color: var(--pine); }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--pine); outline-offset: 2px; }
+  input { flex: 1; min-width: 180px; }
+  #log {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    height: 360px;
+    overflow: auto;
+    padding: 10px 12px;
+    font: 14px/1.45 ui-monospace, Menlo, Consolas, monospace;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .sent { color: var(--tx); }
+  .rx { color: var(--rx); }
+  .err { color: var(--err); }
+  .note { color: var(--muted); font-size: 0.9rem; margin-top: 16px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>ESP-NOW modem test</h1>
+  <p class="status" id="status">Not connected</p>
+
+  <div class="row">
+    <button class="primary" id="connect">Connect board</button>
+    <button id="disconnect" disabled>Disconnect</button>
+  </div>
+
+  <div class="row">
+    <button data-cmd="ID" disabled>ID</button>
+    <button data-cmd="ON" disabled>Radio on</button>
+    <button data-cmd="OFF" disabled>Radio off</button>
+  </div>
+
+  <form class="row" id="txForm">
+    <input id="txText" placeholder="Message to broadcast" maxlength="250" disabled>
+    <button class="primary" id="txBtn" disabled>Send</button>
+  </form>
+
+  <form class="row" id="rawForm">
+    <input id="rawText" placeholder="Raw command, e.g. TX HELLO 1001" disabled>
+    <button id="rawBtn" disabled>Send command</button>
+  </form>
+
+  <div id="log" aria-live="polite"></div>
+  <p class="note">Works in desktop Chrome or Edge. Opening the port may reset the board, so a READY line usually appears on connect.</p>
+</main>
+
+<script>
+let port, reader, writer, readDone, writeDone;
+
+const logEl = document.getElementById('log');
+const statusEl = document.getElementById('status');
+const controls = document.querySelectorAll('[data-cmd], #txText, #txBtn, #rawText, #rawBtn, #disconnect');
+
+function log(text, cls) {
+  const line = document.createElement('div');
+  if (cls) line.className = cls;
+  line.textContent = text;
+  logEl.appendChild(line);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function setConnected(on) {
+  controls.forEach(el => el.disabled = !on);
+  document.getElementById('connect').disabled = on;
+  statusEl.textContent = on ? 'Connected' : 'Not connected';
+  statusEl.classList.toggle('on', on);
+}
+
+async function connect() {
+  if (!('serial' in navigator)) {
+    log('This browser has no Web Serial support. Use desktop Chrome or Edge.', 'err');
+    return;
+  }
+  try {
+    port = await navigator.serial.requestPort();
+    await port.open({ baudRate: 115200 });
+  } catch (e) {
+    log('Could not open port: ' + e.message, 'err');
+    return;
+  }
+
+  const encoder = new TextEncoderStream();
+  writeDone = encoder.readable.pipeTo(port.writable).catch(() => {});
+  writer = encoder.writable.getWriter();
+
+  const decoder = new TextDecoderStream();
+  readDone = port.readable.pipeTo(decoder.writable).catch(() => {});
+  reader = decoder.readable.getReader();
+
+  setConnected(true);
+  readLoop();
+}
+
+async function readLoop() {
+  let buffer = '';
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += value;
+      let i;
+      while ((i = buffer.indexOf('\n')) >= 0) {
+        const line = buffer.slice(0, i).replace(/\r$/, '');
+        buffer = buffer.slice(i + 1);
+        if (line) handleLine(line);
+      }
+    }
+  } catch (e) {
+    log('Read stopped: ' + e.message, 'err');
+  }
+}
+
+// Every line the board sends ends up here. This is where the app logic will go.
+function handleLine(line) {
+  if (line.startsWith('RX ')) log(line, 'rx');
+  else if (line.startsWith('ERR')) log(line, 'err');
+  else log(line);
+}
+
+async function send(cmd) {
+  if (!writer) return;
+  await writer.write(cmd + '\n');
+  log('> ' + cmd, 'sent');
+}
+
+async function disconnect() {
+  try {
+    if (reader) { await reader.cancel(); await readDone; }
+    if (writer) { await writer.close(); await writeDone; }
+    if (port) await port.close();
+  } catch (e) {
+    log('Disconnect error: ' + e.message, 'err');
+  }
+  reader = writer = port = null;
+  setConnected(false);
+}
+
+document.getElementById('connect').onclick = connect;
+document.getElementById('disconnect').onclick = disconnect;
+document.querySelectorAll('[data-cmd]').forEach(btn => {
+  btn.onclick = () => send(btn.dataset.cmd);
+});
+
+document.getElementById('txForm').onsubmit = e => {
+  e.preventDefault();
+  const input = document.getElementById('txText');
+  if (input.value) { send('TX ' + input.value); input.value = ''; }
+};
+
+document.getElementById('rawForm').onsubmit = e => {
+  e.preventDefault();
+  const input = document.getElementById('rawText');
+  if (input.value) { send(input.value); input.value = ''; }
+};
+
+if ('serial' in navigator) {
+  navigator.serial.addEventListener('disconnect', e => {
+    if (e.target === port) { log('Board unplugged', 'err'); reader = writer = port = null; setConnected(false); }
+  });
+}
+</script>
+</body>
+</html>

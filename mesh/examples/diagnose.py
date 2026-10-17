@@ -2,6 +2,7 @@
 
 Run this on BOTH computers at the same time:
 
+    python examples/diagnose.py              (the one ESP32 plugged in)
     python examples/diagnose.py --port /dev/ttyACM0
 
 Step 1 checks the USB link to the board (GET_INFO -> INFO reply).
@@ -16,7 +17,8 @@ import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from trailmesh.espnow_serial import CMD_GET_INFO, EspNowSerialLink  # noqa: E402
+from trailmesh.espnow_serial import CMD_GET_INFO, EspNowSerialLink, LinkLost  # noqa: E402
+from trailmesh.transport import TransportError  # noqa: E402
 from trailmesh.wire import Frame  # noqa: E402
 
 PING_MAGIC = b"\x00\x00\x00\x00DIAG"  # sender id 0 never decodes as a real trailmesh device
@@ -37,12 +39,16 @@ def refresh_status(link, timeout=2.0):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--port", required=True)
+    ap.add_argument("--port", default="auto", help="auto, COM3, /dev/ttyACM0, termux-usb, ...")
     ap.add_argument("--seconds", type=float, default=30)
     args = ap.parse_args()
 
     logs = []
-    link = EspNowSerialLink(args.port, log=lambda *a: logs.append(" ".join(map(str, a))))
+    try:
+        link = EspNowSerialLink(args.port, log=lambda *a: logs.append(" ".join(map(str, a))))
+    except TransportError as e:
+        print(f"FAIL: can't open the board: {e}")
+        return 1
     try:
         print(f"[1/2] Asking the board on {args.port} for its MAC...")
         deadline = time.time() + 5
@@ -115,4 +121,7 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except LinkLost as e:
+        sys.exit(f"FAIL: {e}")

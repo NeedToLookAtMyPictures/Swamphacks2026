@@ -5,9 +5,15 @@ default), so run it next to the app. Set the device up once in the app first
 (POST /api/device), or pass --name to create it here.
 
     pip install -r requirements.txt
-    python examples/run_node.py --port /dev/ttyACM0 --name alice --demo
+    python examples/run_node.py --name alice --demo
     python examples/run_node.py --port /dev/ttyACM1 --db other.db --name bob --demo
-    (Windows: --port COM3. Prefer /dev/serial/by-id/... on Linux: ttyACM numbers can swap.)
+
+--port defaults to "auto": the one ESP32 plugged in. With several boards, name
+one: COM3 on Windows, /dev/serial/by-id/... on Linux (ttyACM numbers can swap).
+
+Android (Termux): run the same command. It reruns itself through termux-usb to
+get access to the board (accept the dialog). If the board is unplugged, the node
+stops and has to be started again; see trailmesh/termux_usb.py.
 
 Use --demo for always-on radio (instant discovery) instead of the 20 s duty cycle.
 """
@@ -23,7 +29,8 @@ sys.path.insert(0, os.path.join(HERE, "..", "..", "application", "user_app"))
 from database import DEFAULT_DB_PATH, Database  # noqa: E402  (the app's database)
 
 from trailmesh import AppStore, Config, Node, Record  # noqa: E402
-from trailmesh.espnow_serial import EspNowSerialLink  # noqa: E402
+from trailmesh.espnow_serial import EspNowSerialLink, LinkLost  # noqa: E402
+from trailmesh.transport import TransportError  # noqa: E402
 from trailmesh.wire import Frame  # noqa: E402
 
 
@@ -57,7 +64,8 @@ def trace(link):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--port", required=True, help="serial port of the ESP32, e.g. COM3 or /dev/ttyUSB0")
+    ap.add_argument("--port", default="auto",
+                    help="the ESP32: auto (default), COM3, /dev/ttyACM0, or on Android termux-usb or /dev/bus/usb/...")
     ap.add_argument("--db", default=str(DEFAULT_DB_PATH), help="the app's database file")
     ap.add_argument("--name", help="create the device with this name if it isn't set up yet")
     ap.add_argument("--demo", action="store_true", help="radio always on")
@@ -81,7 +89,10 @@ def main():
         print(f"session with {s.peer_id} {'ok' if s.ok else 'FAILED'}: "
               f"got {s.records_received}, sent {s.records_sent}")
 
-    link = EspNowSerialLink(args.port)
+    try:
+        link = EspNowSerialLink(args.port)
+    except TransportError as e:
+        sys.exit(f"can't open the board: {e}")
     if args.verbose:
         trace(link)
     node = Node(link, store, Config(always_on=args.demo), on_record=on_record, on_delivered=on_delivered,
@@ -103,6 +114,10 @@ def main():
     try:
         node.run_forever()
     except KeyboardInterrupt:
+        pass
+    except LinkLost as e:
+        sys.exit(str(e))
+    finally:
         link.close()
 
 

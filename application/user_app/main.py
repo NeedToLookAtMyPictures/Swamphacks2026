@@ -12,6 +12,11 @@ Usage:
 With an ESP32 running mesh/firmware/espnow_bridge, also sync over the mesh:
     python main.py --mesh-port /dev/ttyACM0 --mesh-demo
 
+On an Android phone in Termux, with the ESP32 plugged into the phone over USB:
+    python main.py --phone --mesh-demo
+(it reruns itself through termux-usb to get the board: accept the dialog; then
+open http://127.0.0.1:5000 in the phone's browser. See mesh/docs/transport.md.)
+
 Two hikers on one computer (each with its own database, web port and board):
     python main.py --db data/alice.db --port 5001 --mesh-port /dev/ttyACM0 --mesh-demo
     python main.py --db data/bob.db --port 5002 --mesh-port /dev/ttyACM1 --mesh-demo
@@ -109,20 +114,28 @@ def ensure_certificate():
 def start_mesh(db, serial_port, demo):
     """Run a mesh node on this app's database in a background thread.
 
-    The node starts once the device has a name (set up in the web interface),
-    since the mesh identifies devices by it.
+    The board is opened right away, here on the main thread: on Android that
+    reruns the whole program under termux-usb, which has to happen before the
+    web server starts. The node starts once the device has a name (set up in
+    the web interface), since the mesh identifies devices by it.
     """
     sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "mesh"))
     from trailmesh import AppStore, Config, Node
-    from trailmesh.espnow_serial import EspNowSerialLink
+    from trailmesh.espnow_serial import EspNowSerialLink, LinkLost
+    from trailmesh.transport import TransportError
 
     def mesh_log(*msg):
         print("[mesh]", *msg, flush=True)
 
+    try:
+        link = EspNowSerialLink(serial_port, log=mesh_log)
+    except TransportError as e:
+        sys.exit(f"can't open the mesh board: {e}")
+    link.set_radio(False)  # the node turns it on when it starts
+
     def worker():
         while db.get_device() is None:
             time.sleep(1)
-        link = EspNowSerialLink(serial_port, log=mesh_log)
         node = Node(
             link, AppStore(db), Config(always_on=demo),
             on_record=lambda r: mesh_log(f"received {r.kind.name.lower()} from the mesh"),
@@ -130,7 +143,12 @@ def start_mesh(db, serial_port, demo):
             on_session_end=lambda s: mesh_log(f"sync with node {s.peer_id:08x} {'ok' if s.ok else 'failed'}"),
         )
         mesh_log(f"node {node.id:08x} running on {serial_port}")
-        node.run_forever()
+        try:
+            node.run_forever()
+        except LinkLost as e:
+            # Android: the board was unplugged and only a new program run can get it back.
+            # The web interface keeps working without the mesh.
+            mesh_log(f"{e}; the mesh is off until then")
 
     threading.Thread(target=worker, daemon=True, name="mesh").start()
 
@@ -152,6 +170,13 @@ def run(args):
     if not MAP_FILE.exists():
         print("No offline map found. Run `python download_locales.py map` first.")
     app.config["DATABASE"].purge()
+    # Before anything else starts: on Android this reruns the program (see start_mesh)
+    if args.phone and not args.mesh_port:
+        args.mesh_port = "termux-usb"
+    if args.mesh_port:
+        if args.debug:
+            sys.exit("--mesh-port can't be combined with --debug (the reloader would open the board twice)")
+        start_mesh(app.config["DATABASE"], args.mesh_port, args.mesh_demo)
     finder = server_sync.ServerFinder(args.server, lan=not args.no_lan)
     app.config["SERVER"] = finder
     # With --debug the reloader runs this twice; only sync from the process that serves
@@ -159,10 +184,6 @@ def run(args):
             not args.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true"):
         print(f"Syncing with {finder.describe()} whenever it can be reached")
         server_sync.start(app.config["DATABASE"], finder, app.config["GLOBAL_DATABASE"], DATA_DIR)
-    if args.mesh_port:
-        if args.debug:
-            sys.exit("--mesh-port can't be combined with --debug (the reloader would open the board twice)")
-        start_mesh(app.config["DATABASE"], args.mesh_port, args.mesh_demo)
     ssl_context = None
     if args.https:
         ensure_certificate()
@@ -188,7 +209,11 @@ def main():
                         help="serve over HTTPS (needed for GPS when a phone opens the app "
                              "from another device, e.g. a Raspberry Pi over Bluetooth)")
     parser.add_argument("--db", help="database file (default data/user.db); use one per hiker on a shared computer")
-    parser.add_argument("--mesh-port", help="serial port of an ESP32 running the bridge firmware; syncs over the mesh")
+    parser.add_argument("--mesh-port", help="the ESP32 running the bridge firmware, syncs over the mesh: "
+                             "auto, COM3, /dev/ttyACM0, or on Android termux-usb or /dev/bus/usb/...")
+    parser.add_argument("--phone", action="store_true",
+                        help="running on an Android phone in Termux: reach the board through termux-usb "
+                             "(the default --mesh-port then) instead of a serial port")
     parser.add_argument("--mesh-demo", action="store_true", help="mesh radio always on (instant discovery)")
     run(parser.parse_args())
 

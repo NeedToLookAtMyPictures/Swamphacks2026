@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Bridge test (mobile)</title>
+<style>
+  :root {
+    --bg: #eef3f0;
+    --panel: #ffffff;
+    --ink: #1b2820;
+    --muted: #5e6f65;
+    --line: #cfdad3;
+    --pine: #2f5d46;
+    --pine-ink: #ffffff;
+    --rx: #1d6a86;
+    --tx: #2f5d46;
+    --err: #b3261e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --bg: #121815;
+      --panel: #1b231f;
+      --ink: #e3ebe6;
+      --muted: #91a399;
+      --line: #2e3a34;
+      --pine: #72b592;
+      --pine-ink: #0f241a;
+      --rx: #80c6de;
+      --tx: #92d3af;
+      --err: #f28a82;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font: 17px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  header {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--bg);
+    padding: calc(12px + env(safe-area-inset-top, 0px)) 16px 10px;
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  h1 { font-size: 1.15rem; margin: 0; }
+  #status { color: var(--muted); font-size: 0.95rem; }
+  #status.on { color: var(--pine); font-weight: 600; }
+  main { max-width: 640px; margin: 0 auto; padding: 14px 16px 24px; }
+  .row { display: flex; gap: 10px; margin-bottom: 12px; }
+  .row > * { flex: 1; }
+  .cmds { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-bottom: 12px; }
+  button, input {
+    font: inherit;
+    min-height: 48px;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    color: var(--ink);
+    padding: 0 12px;
+  }
+  .cmds button { padding: 0 4px; font-size: 0.95rem; }
+  button { cursor: pointer; }
+  button.primary { background: var(--pine); border-color: var(--pine); color: var(--pine-ink); font-weight: 600; }
+  button:disabled, input:disabled { opacity: 0.45; cursor: not-allowed; }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--pine); outline-offset: 2px; }
+  form.row input { flex: 3; min-width: 0; }
+  .logHead { display: flex; justify-content: space-between; align-items: center; margin: 18px 0 6px; color: var(--muted); }
+  .logHead button { min-height: 36px; font-size: 0.9rem; }
+  #log {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    height: 48vh;
+    min-height: 240px;
+    overflow: auto;
+    padding: 10px 12px;
+    font: 13px/1.45 ui-monospace, Menlo, Consolas, monospace;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .sent { color: var(--tx); }
+  .rx { color: var(--rx); }
+  .err { color: var(--err); }
+  .muted { color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Bridge test</h1>
+  <span id="status">Not connected</span>
+</header>
+
+<main>
+  <div class="row">
+    <button class="primary" id="connect">Connect board</button>
+    <button id="disconnect" disabled>Disconnect</button>
+  </div>
+
+  <div class="cmds">
+    <button data-cmd="HELP" disabled>Help</button>
+    <button data-cmd="ID" disabled>ID</button>
+    <button data-cmd="STATUS" disabled>Status</button>
+    <button data-cmd="ON" disabled>On</button>
+    <button data-cmd="OFF" disabled>Off</button>
+  </div>
+
+  <form class="row" id="txForm">
+    <input id="txText" placeholder="Message to broadcast" maxlength="250" autocomplete="off" disabled>
+    <button class="primary" id="txBtn" disabled>Send</button>
+  </form>
+
+  <form class="row" id="rawForm">
+    <input id="rawText" placeholder="Any command, e.g. TX hi" autocomplete="off" autocapitalize="off" disabled>
+    <button id="rawBtn" disabled>Run</button>
+  </form>
+
+  <div class="logHead">
+    <span>Log</span>
+    <button id="clear">Clear</button>
+  </div>
+  <div id="log" aria-live="polite"></div>
+</main>
+
+<script>
+// Talks to firmware/espnow_bridge over WebUSB, for phones where Web Serial
+// can't reach USB devices. Implements just enough of USB CDC-ACM (the standard
+// USB serial class the Feather ESP32-S3's native USB uses) to send and receive bytes.
+
+const VENDOR_IDS = [0x239a, 0x303a];  // Adafruit, Espressif
+const BAUD = 460800;                  // matches espnow_bridge; native USB ignores it
+const LINE_STATE = 0x03;              // DTR + RTS on, same as a desktop serial port open
+
+// espnow_bridge binary messages (see trailmesh/espnow_serial.py)
+const EVT_RECV = 0x81, EVT_INFO = 0x84, EVT_LOG = 0x85;
+const SLIP_END = 0xC0, SLIP_ESC = 0xDB, SLIP_ESC_END = 0xDC, SLIP_ESC_ESC = 0xDD;
+const STATUS_SIZE = 26;               // struct Status in the firmware: <BBiIIIII
+const FRAME_TYPES = { 1: 'BEACON', 2: 'HELLO', 3: 'HELLO_ACK', 4: 'ACK', 5: 'INV', 6: 'WANT', 7: 'DATA', 8: 'DONE' };
+
+let usb = null;   // { device, ctrlIf, dataIf, epIn, epOut }
+const utf8 = new TextDecoder();
+const encoder = new TextEncoder();
+
+const logEl = document.getElementById('log');
+const statusEl = document.getElementById('status');
+const connectBtn = document.getElementById('connect');
+const controls = document.querySelectorAll('[data-cmd], #txText, #txBtn, #rawText, #rawBtn, #disconnect');
+
+// ---------- UI ----------
+
+function log(text, cls) {
+  const line = document.createElement('div');
+  if (cls) line.className = cls;
+  line.textContent = text;
+  logEl.appendChild(line);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function setConnected(on) {
+  controls.forEach(el => el.disabled = !on);
+  connectBtn.disabled = on;
+  statusEl.textContent = on ? 'Connected' : 'Not connected';
+  statusEl.classList.toggle('on', on);
+}
+
+// ---------- USB connection ----------
+
+function findCdc(device) {
+  let ctrlIf = null, data = null;
+  for (const iface of device.configuration.interfaces) {
+    const alt = iface.alternates[0];
+    if (alt.interfaceClass === 2 && ctrlIf === null) ctrlIf = iface.interfaceNumber;
+    if (alt.interfaceClass === 10 && data === null) {
+      const epIn = alt.endpoints.find(e => e.type === 'bulk' && e.direction === 'in');
+      const epOut = alt.endpoints.find(e => e.type === 'bulk' && e.direction === 'out');
+      if (epIn && epOut) data = { dataIf: iface.interfaceNumber, epIn: epIn.endpointNumber, epOut: epOut.endpointNumber };
+    }
+  }
+  return data ? { ctrlIf, ...data } : null;
+}
+
+async function connect() {
+  let device;
+  try {
+    device = await navigator.usb.requestDevice({ filters: VENDOR_IDS.map(vendorId => ({ vendorId })) });
+  } catch (e) {
+    log('No board selected. If the list was empty, check the cable, the OTG adapter, and the phone\'s OTG setting.', 'muted');
+    return;
+  }
+
+  try {
+    await device.open();
+    if (device.configuration === null) await device.selectConfiguration(1);
+    const cdc = findCdc(device);
+    if (!cdc) throw new Error('this device has no USB serial interface');
+    if (cdc.ctrlIf !== null) await device.claimInterface(cdc.ctrlIf);
+    await device.claimInterface(cdc.dataIf);
+
+    if (cdc.ctrlIf !== null) {
+      try {
+        // SET_LINE_CODING (baud, 1 stop bit, no parity, 8 data bits), then SET_CONTROL_LINE_STATE
+        const coding = new DataView(new ArrayBuffer(7));
+        coding.setUint32(0, BAUD, true);
+        coding.setUint8(6, 8);
+        await device.controlTransferOut(
+          { requestType: 'class', recipient: 'interface', request: 0x20, value: 0, index: cdc.ctrlIf }, coding);
+        await device.controlTransferOut(
+          { requestType: 'class', recipient: 'interface', request: 0x22, value: LINE_STATE, index: cdc.ctrlIf });
+      } catch (e) {
+        log('Warning: could not set line state (' + e.message + '). Trying anyway.', 'muted');
+      }
+    }
+    usb = { device, ...cdc };
+  } catch (e) {
+    log('Could not open the board: ' + e.message, 'err');
+    if (/claim/i.test(e.message)) {
+      log('Another app (or Android itself) is holding the board. Close other serial apps, unplug the board, and plug it back in.', 'err');
+    }
+    try { await device.close(); } catch {}
+    return;
+  }
+
+  resetParser();
+  setConnected(true);
+  log('Connected to ' + (device.productName || 'board') + '. Tap ID to check it responds.');
+  readLoop(usb);
+}
+
+async function readLoop(current) {
+  while (usb === current) {
+    try {
+      const r = await current.device.transferIn(current.epIn, 512);
+      if (r.status === 'stall') {
+        await current.device.clearHalt('in', current.epIn);
+        continue;
+      }
+      if (r.data && r.data.byteLength) {
+        feed(new Uint8Array(r.data.buffer, r.data.byteOffset, r.data.byteLength));
+      }
+    } catch (e) {
+      if (usb === current) {
+        log('Connection lost: ' + e.message, 'err');
+        usb = null;
+        setConnected(false);
+        try { await current.device.close(); } catch {}
+      }
+      return;
+    }
+  }
+}
+
+async function send(cmd) {
+  if (!usb) return;
+  try {
+    await usb.device.transferOut(usb.epOut, encoder.encode(cmd + '\n'));
+    log('> ' + cmd, 'sent');
+  } catch (e) {
+    log('Send failed: ' + e.message, 'err');
+  }
+}
+
+async function disconnect() {
+  const current = usb;
+  if (!current) return;
+  usb = null;   // stops the read loop
+  setConnected(false);
+  try { await current.device.close(); } catch (e) { log('Disconnect error: ' + e.message, 'err'); }
+  log('Disconnected', 'muted');
+}
+
+// ---------- Incoming data: text lines and SLIP-framed binary messages ----------
+// Same rule as the firmware: 0xC0 starts and ends a binary message, everything else is text.
+
+const parser = { inFrame: false, esc: false, frame: [], text: [] };
+
+function resetParser() {
+  parser.inFrame = false;
+  parser.esc = false;
+  parser.frame = [];
+  parser.text = [];
+}
+
+function feed(bytes) {
+  for (const b of bytes) {
+    if (b === SLIP_END) {
+      if (parser.inFrame && parser.frame.length) {
+        handleFrame(Uint8Array.from(parser.frame));
+        parser.inFrame = false;
+      } else {
+        parser.inFrame = true;
+      }
+      parser.frame = [];
+      parser.esc = false;
+      continue;
+    }
+    if (parser.inFrame) {
+      if (parser.esc) {
+        parser.frame.push(b === SLIP_ESC_END ? SLIP_END : b === SLIP_ESC_ESC ? SLIP_ESC : b);
+        parser.esc = false;
+      } else if (b === SLIP_ESC) {
+        parser.esc = true;
+      } else {
+        parser.frame.push(b);
+      }
+      continue;
+    }
+    if (b === 0x0A) {
+      if (parser.text.length) handleLine(utf8.decode(Uint8Array.from(parser.text)));
+      parser.text = [];
+    } else if (b !== 0x0D) {
+      parser.text.push(b);
+    }
+  }
+}
+
+function handleLine(line) {
+  if (line.startsWith('RX ')) log(line, 'rx');
+  else if (line.startsWith('ERR')) log(line, 'err');
+  else if (line.startsWith('LOG ')) log(line, 'muted');
+  else log(line);
+}
+
+function fmtMac(bytes) {
+  return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join(':');
+}
+
+function describePayload(p) {
+  // trailmesh frames start with sender u32 LE, then a type byte (see wire.py)
+  if (p.length >= 12 && FRAME_TYPES[p[4]]) {
+    const sender = new DataView(p.buffer, p.byteOffset, 4).getUint32(0, true);
+    return `trailmesh ${FRAME_TYPES[p[4]]} from ${sender} (${p.length} bytes)`;
+  }
+  return Array.from(p, b => (b >= 0x20 && b < 0x7f) ? String.fromCharCode(b) : '.').join('');
+}
+
+function handleFrame(m) {
+  const type = m[0];
+  if (type === EVT_LOG) {
+    log('LOG ' + utf8.decode(m.subarray(1)), 'muted');
+  } else if (type === EVT_RECV && m.length >= 8) {
+    const rssi = (m[7] << 24) >> 24;
+    log(`RX ${fmtMac(m.subarray(1, 7))} ${rssi} ${describePayload(m.subarray(8))}`, 'rx');
+  } else if (type === EVT_INFO && m.length >= 7) {
+    let s = 'INFO mac=' + fmtMac(m.subarray(1, 7));
+    if (m.length >= 7 + STATUS_SIZE) {
+      const v = new DataView(m.buffer, m.byteOffset + 7, STATUS_SIZE);
+      s += ` radio=${v.getUint8(0) ? 'on' : 'off'} channel=${v.getUint8(1)} last_err=${v.getInt32(2, true)}` +
+           ` sent=${v.getUint32(6, true)} send_errors=${v.getUint32(10, true)} received=${v.getUint32(14, true)}` +
+           ` filtered=${v.getUint32(18, true)} dropped=${v.getUint32(22, true)}`;
+    }
+    log(s);
+  } else {
+    log('Unknown binary message 0x' + type.toString(16), 'muted');
+  }
+}
+
+// ---------- Wiring ----------
+
+connectBtn.onclick = connect;
+document.getElementById('disconnect').onclick = disconnect;
+document.getElementById('clear').onclick = () => { logEl.textContent = ''; };
+document.querySelectorAll('[data-cmd]').forEach(btn => {
+  btn.onclick = () => send(btn.dataset.cmd);
+});
+
+document.getElementById('txForm').onsubmit = e => {
+  e.preventDefault();
+  const input = document.getElementById('txText');
+  if (input.value) { send('TX ' + input.value); input.value = ''; }
+};
+
+document.getElementById('rawForm').onsubmit = e => {
+  e.preventDefault();
+  const input = document.getElementById('rawText');
+  if (input.value) { send(input.value); input.value = ''; }
+};
+
+if (!('usb' in navigator)) {
+  connectBtn.disabled = true;
+  log(window.isSecureContext
+    ? 'This browser has no WebUSB. Use Chrome on Android.'
+    : 'WebUSB needs a secure page. Open this over https or localhost, or add this address to Chrome\'s insecure-origin flag.', 'err');
+} else {
+  navigator.usb.addEventListener('disconnect', e => {
+    if (usb && e.device === usb.device) {
+      usb = null;
+      setConnected(false);
+      log('Board unplugged', 'err');
+    }
+  });
+}
+</script>
+</body>
+</html>
