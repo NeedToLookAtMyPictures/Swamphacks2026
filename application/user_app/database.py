@@ -26,6 +26,8 @@ SCHEMA_VERSION = 2
 
 # Names are people's addresses: short (they go over LoRa) and compared ignoring case
 NAME_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
+# Receiver for messages to everyone. Not a valid name, so no person can have it.
+BROADCAST = "*"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS locales (
@@ -216,8 +218,11 @@ class Database:
         """Send a message to a name: someone from contacts(), or any name at all.
 
         It travels through the network until the device with that name sees it.
+        With receiver=BROADCAST it is for everyone: nobody marks it delivered, so
+        it spreads until it expires after 31 days.
         """
-        check_name(receiver)
+        if receiver != BROADCAST:
+            check_name(receiver)
         now = time.time()
         with self._connect() as conn:
             origin_id, me, seq = self._take_seq(conn)
@@ -282,7 +287,7 @@ class Database:
                 "SELECT name, MAX(last_heard) AS last_heard FROM ("
                 "  SELECT user AS name, time_created AS last_heard FROM geolocations"
                 "  UNION ALL SELECT sender, time_created FROM messages"
-                "  UNION ALL SELECT receiver, NULL FROM messages"
+                "  UNION ALL SELECT receiver, NULL FROM messages WHERE receiver != '*'"
                 "  UNION ALL SELECT sender, time_created FROM locales"
                 ") WHERE name IS NOT ? GROUP BY name COLLATE NOCASE ORDER BY name COLLATE NOCASE",
                 (me,)).fetchall()

@@ -18,9 +18,10 @@
     <section id="messages" class="panel active">
       <form id="compose">
         <label>To
-          <input id="compose-to" list="contact-list" placeholder="someone you've met, or any name"
-                 pattern="[A-Za-z0-9_\-]{1,32}" required autocomplete="off">
+          <select id="compose-to" required></select>
         </label>
+        <input id="compose-other" list="contact-list" placeholder="Type a name"
+               pattern="[A-Za-z0-9_\-]{1,32}" autocomplete="off" hidden>
         <datalist id="contact-list"></datalist>
         <textarea id="compose-content" placeholder="Message" rows="3" required></textarea>
         <div class="compose-row">

@@ -59,7 +59,9 @@ People are identified by their **name**, which is unique between people and
 can't be changed (1-32 letters, digits, `_` or `-`, compared ignoring case).
 Messages are addressed to a name, so you can send to someone you've
 encountered or to any name at all; the message is passed from device to device
-until the one with that name sees it. Offline, the app can only refuse names
+until the one with that name sees it. A message with receiver `*` goes to
+**everyone**: nobody marks it delivered, so it spreads until it expires after 31
+days. (`*` isn't a valid name, so no person can be called that.) Offline, the app can only refuse names
 it has already seen, so real uniqueness has to come from the server at setup.
 
 If you have a `data/user.db` from before names replaced `user_id`, delete it. Expired messages are deleted, except on the sender's and receiver's
@@ -75,7 +77,7 @@ All endpoints take and return JSON. Full list in `api.py`.
 | POST | `/api/device` | create identity once: `{name, device_id?}` (`device_id` is generated if left out) |
 | PATCH | `/api/device` | update mutable fields: `{last_server_sync}` |
 | POST | `/api/locales` | `{location, name, comment?}` |
-| POST | `/api/messages` | `{receiver, content}`: `receiver` is a name |
+| POST | `/api/messages` | `{receiver, content}`: `receiver` is a name, or `*` for everyone |
 | GET | `/api/contacts` | everyone this device knows about, with last known position |
 | POST | `/api/messages/<origin_id>/<seq>/delivered` | receiver marks a message delivered (creates a tombstone) |
 | PUT | `/api/location` | `{latitude, longitude}`: this user's current position |
@@ -92,6 +94,6 @@ Tests: `python -m unittest test_database`
 
 ## Tabs
 
-- **Messages**: send to someone you've encountered (suggested as you type) or any name; shows messages you sent and received
+- **Messages**: the To dropdown lists everyone in your GPS data, plus Everyone and Other (type any name); shows messages you sent, received, and broadcasts
 - **Map**: offline Leaflet map
 - **Debug**: shows every table in the local database (refresh button; offers to create the device if it has no identity yet)

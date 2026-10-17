@@ -132,7 +132,7 @@ main {
   font-weight: 600;
 }
 
-#compose input, #compose textarea {
+#compose input, #compose textarea, #compose select {
   flex: 1;
   padding: 8px;
   font: inherit;
@@ -173,6 +173,7 @@ main {
 }
 
 .message.outgoing { border-left-color: #7a9cc6; }
+#compose input[hidden] { display: none; }
 .message.dead { opacity: 0.55; }
 
 .message-head {

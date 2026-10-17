@@ -7,7 +7,7 @@ Device (this user, never shared)
 
 Records created on this device
     POST   /api/locales                     {location, name, comment?}
-    POST   /api/messages                    {receiver, content}; receiver is a name
+    POST   /api/messages                    {receiver, content}; receiver is a name, or "*" for everyone
     POST   /api/messages/<origin>/<seq>/delivered   receiver marks a message delivered
     PUT    /api/location                    {latitude, longitude} this user's position
 

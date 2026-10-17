@@ -2,6 +2,11 @@
 
 let myName = null;
 
+const BROADCAST = "*";        // receiver for messages to everyone
+const OTHER = "__other__";    // dropdown value that reveals the free-text box
+
+const sameName = (a, b) => a.toLowerCase() === b.toLowerCase();
+
 function msgEl(tag, text, className) {
   const node = document.createElement(tag);
   if (text !== undefined) node.textContent = text;  // textContent, so messages can't inject HTML
@@ -16,19 +21,21 @@ function describeContact(c) {
 }
 
 function renderMessage(m) {
-  const outgoing = m.sender.toLowerCase() === myName.toLowerCase();
+  const outgoing = sameName(m.sender, myName);
+  const broadcast = m.receiver === BROADCAST;
   const card = msgEl("div", undefined, `message ${outgoing ? "outgoing" : "incoming"}`);
   if (m.is_dead) card.classList.add("dead");
 
   const head = msgEl("div", undefined, "message-head");
-  head.appendChild(msgEl("strong", outgoing ? `To ${m.receiver}` : `From ${m.sender}`));
+  const to = broadcast ? "Everyone" : m.receiver;
+  head.appendChild(msgEl("strong", outgoing ? `To ${to}` : `From ${m.sender}${broadcast ? " to Everyone" : ""}`));
   head.appendChild(msgEl("span", new Date(m.time_created * 1000).toLocaleString()));
   card.appendChild(head);
   card.appendChild(msgEl("div", m.content, "message-body"));
 
   if (m.is_dead) {
     card.appendChild(msgEl("div", outgoing ? "delivered or expired" : "delivered", "message-note"));
-  } else if (!outgoing) {
+  } else if (!outgoing && !broadcast) {
     const button = msgEl("button", "Mark delivered");
     button.addEventListener("click", async () => {
       await fetch(`/api/messages/${encodeURIComponent(m.origin_id)}/${m.seq}/delivered`,
@@ -49,12 +56,15 @@ async function loadMessages() {
   }
   myName = (await deviceRes.json()).name;
 
-  const [messages, contacts] = await Promise.all([
+  const [messages, contacts, gps] = await Promise.all([
     fetch("/api/messages").then((r) => r.json()),
     fetch("/api/contacts").then((r) => r.json()),
+    fetch("/api/geolocations").then((r) => r.json()),
   ]);
 
-  // Suggestions for the "To" box: everyone this device knows about
+  fillRecipients(gps.filter((g) => !sameName(g.user, myName)));
+
+  // Suggestions for the "Type a name" box: everyone this device knows about
   const options = document.getElementById("contact-list");
   options.replaceChildren(...contacts.map((c) => {
     const option = msgEl("option");
@@ -65,24 +75,60 @@ async function loadMessages() {
 
   // Only messages I sent or that are addressed to me; the rest are just being relayed
   const mine = messages
-    .filter((m) => [m.sender, m.receiver].some((n) => n.toLowerCase() === myName.toLowerCase()))
+    .filter((m) => m.receiver === BROADCAST || [m.sender, m.receiver].some((n) => sameName(n, myName)))
     .reverse();  // newest first
   list.replaceChildren(...(mine.length ? mine.map(renderMessage)
                                        : [msgEl("p", "No messages yet.", "message-note")]));
 }
 
+// "To" dropdown: everyone in the GPS table (newest position first), Everyone, or Other
+function fillRecipients(people) {
+  const select = document.getElementById("compose-to");
+  const previous = select.value;
+  const option = (value, label) => {
+    const o = msgEl("option", label);
+    o.value = value;
+    return o;
+  };
+  const sorted = [...people].sort((a, b) => b.time_created - a.time_created);
+  const placeholder = option("", "Choose a recipient…");
+  placeholder.disabled = true;
+  select.replaceChildren(
+    placeholder,
+    option(BROADCAST, "Everyone"),
+    ...sorted.map((g) => option(g.user,
+      `${g.user} (seen ${new Date(g.time_created * 1000).toLocaleString()})`)),
+    option(OTHER, "Other (type a name)…"),
+  );
+  // Keep the current choice across refreshes if it's still there
+  select.value = [...select.options].some((o) => o.value === previous && previous) ? previous : "";
+  toggleOther();
+}
+
+function toggleOther() {
+  const other = document.getElementById("compose-other");
+  other.hidden = document.getElementById("compose-to").value !== OTHER;
+  other.required = !other.hidden;
+}
+
+document.getElementById("compose-to").addEventListener("change", toggleOther);
+
 document.getElementById("compose").addEventListener("submit", async (e) => {
   e.preventDefault();
-  const to = document.getElementById("compose-to");
+  const select = document.getElementById("compose-to");
+  const receiver = select.value === OTHER
+    ? document.getElementById("compose-other").value.trim()
+    : select.value;
+  const label = receiver === BROADCAST ? "everyone" : receiver;
   const content = document.getElementById("compose-content");
   const status = document.getElementById("compose-status");
   const res = await fetch("/api/messages", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ receiver: to.value.trim(), content: content.value }),
+    body: JSON.stringify({ receiver, content: content.value }),
   });
   if (res.ok) {
-    status.textContent = `Queued for ${to.value.trim()}. It will be passed along as you meet people.`;
+    status.textContent = `Queued for ${label}. It will be passed along as you meet people.`;
     content.value = "";
     loadMessages();
   } else {

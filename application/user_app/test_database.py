@@ -100,6 +100,16 @@ class DatabaseTest(unittest.TestCase):
         self.alice.merge(dave.export())
         self.assertTrue(self.alice.get("messages", "d-alice", msg["seq"])["is_dead"])
 
+    def test_broadcast_reaches_everyone_and_is_never_delivered(self):
+        msg = self.alice.add_message("*", "Bridge at mile 3 is out")
+        self.bob.merge(self.alice.export())
+        self.carol.merge(self.bob.export())
+        for db in (self.bob, self.carol):
+            self.assertEqual(db.get("messages", "d-alice", msg["seq"])["receiver"], "*")
+        self.assertNotIn("*", [c["name"] for c in self.carol.contacts()])
+        with self.assertRaises(ValueError):
+            self.alice.add_message("everyone!", "not a valid name")
+
     def test_names_are_case_insensitive(self):
         msg = self.alice.add_message("BOB", "hi")
         self.bob.merge(self.alice.export())
@@ -196,6 +206,10 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(len(shared["tombstones"]), 1)
         self.assertEqual(len(shared["geolocations"]), 1)
         self.assertEqual([p["name"] for p in c.get("/api/contacts").json], ["bob"])
+        self.assertEqual(c.post("/api/messages", json={"receiver": "*", "content": "all"}).status_code, 201)
+        broadcast = c.get("/api/messages").json[-1]
+        # a broadcast has no single receiver, so nobody can mark it delivered
+        self.assertEqual(c.post(f"/api/messages/{broadcast['origin_id']}/{broadcast['seq']}/delivered").status_code, 403)
         self.assertEqual(c.get("/api/nope").status_code, 404)
         self.assertEqual(c.post("/api/sync", json={"nope": []}).status_code, 400)
         self.assertEqual(c.post("/api/sync", json={"messages": [{"seq": 1}]}).status_code, 400)
