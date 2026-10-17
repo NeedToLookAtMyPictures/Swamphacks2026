@@ -53,15 +53,30 @@ if [[ -n "${NGROK_DOMAIN:-}" ]]; then
   echo "Public URL: https://${NGROK_DOMAIN}   (database page: https://${NGROK_DOMAIN}/)"
   echo
   ngrok http --url="https://${NGROK_DOMAIN}" "${PORT}" --log stdout --log-level warn
-elif [[ -n "${CLOUDFLARE_TUNNEL}" ]]; then
-  echo
-  echo "Public URL: https://heuslerene.com/server   (database page: https://heuslerene.com/server/)"
-  echo
-  cloudflared tunnel --no-autoupdate run --url "http://localhost:${PORT}" "${CLOUDFLARE_TUNNEL}"
 else
-  echo
-  echo "Public URL: look for https://<random-words>.trycloudflare.com below."
-  echo "It changes every time this script starts."
-  echo
-  cloudflared tunnel --no-autoupdate --url "http://localhost:${PORT}"
+  # cloudflared reads ~/.cloudflared/config.yml on its own, and that may hold
+  # another tunnel's rules (which answer 404 for this one). Give it our own config.
+  mkdir -p data
+  CONFIG="data/cloudflared.yml"
+  if [[ -n "${CLOUDFLARE_TUNNEL}" ]]; then
+    TUNNEL_ID="$(cloudflared tunnel list 2>/dev/null | awk -v n="${CLOUDFLARE_TUNNEL}" '$2 == n {print $1}')"
+    CREDENTIALS="${HOME}/.cloudflared/${TUNNEL_ID}.json"
+    if [[ -z "${TUNNEL_ID}" || ! -f "${CREDENTIALS}" ]]; then
+      echo "No tunnel named ${CLOUDFLARE_TUNNEL} with credentials in ~/.cloudflared (see README.md)."
+      exit 1
+    fi
+    printf 'tunnel: %s\ncredentials-file: %s\ningress:\n  - service: http://localhost:%s\n' \
+      "${TUNNEL_ID}" "${CREDENTIALS}" "${PORT}" > "${CONFIG}"
+    echo
+    echo "Public URL: https://heuslerene.com/server   (database page: https://heuslerene.com/server/)"
+    echo
+    cloudflared tunnel --no-autoupdate --config "${CONFIG}" run
+  else
+    echo "no-autoupdate: true" > "${CONFIG}"
+    echo
+    echo "Public URL: look for https://<random-words>.trycloudflare.com below."
+    echo "It changes every time this script starts."
+    echo
+    cloudflared tunnel --config "${CONFIG}" --url "http://localhost:${PORT}"
+  fi
 fi
