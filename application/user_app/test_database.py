@@ -9,7 +9,8 @@ from pathlib import Path
 from flask import Flask
 
 from api import api
-from database import MESSAGE_TTL, Database, DeviceNotInitialized
+from database import MESSAGE_TTL, SCHEMA, Database, DeviceNotInitialized
+from global_database import GlobalDatabase
 
 
 def make_db(tmp, name, device_id):
@@ -67,6 +68,59 @@ class DatabaseTest(unittest.TestCase):
 
         self.carol.merge(self.bob.export())
         self.assertTrue(self.carol.get("messages", "d-alice", 1)["is_dead"])
+
+    def test_sender_sees_received_only_from_tombstone_within_31_days(self):
+        msg = self.alice.add_message("bob", "hi")
+        self.bob.merge(self.alice.export())
+        self.alice.merge(self.bob.export())     # tombstone reaches alice in time
+        message = self.alice.get("messages", "d-alice", msg["seq"])
+        self.assertTrue(message["is_dead"])
+        self.assertTrue(message["received"])
+        self.assertNotIn("received", self.alice.export()["messages"][0])  # local only
+
+        # the tombstone reaches alice after the message is 31 days old: received or died
+        late = self.alice.add_message("bob", "late")
+        self.bob.merge(self.alice.export())
+        with self.alice._connect() as conn:
+            conn.execute("UPDATE messages SET time_created = ? WHERE seq = ?",
+                         (time.time() - MESSAGE_TTL - 10, late["seq"]))
+        self.alice.merge(self.bob.export())
+        message = self.alice.get("messages", "d-alice", late["seq"])
+        self.assertTrue(message["is_dead"])
+        self.assertFalse(message["received"])
+
+    def test_expired_message_is_not_received(self):
+        msg = self.alice.add_message("bob", "hi")
+        with self.alice._connect() as conn:
+            conn.execute("UPDATE messages SET time_created = ?", (time.time() - MESSAGE_TTL - 10,))
+        self.alice.purge()
+        message = self.alice.get("messages", "d-alice", msg["seq"])
+        self.assertTrue(message["is_dead"])
+        self.assertFalse(message["received"])
+
+    def test_schema_2_gains_received_column(self):
+        path = Path(self.tmp.name) / "v2.db"
+        with sqlite3.connect(path) as conn:
+            conn.executescript(SCHEMA.replace(
+                "    received      INTEGER NOT NULL DEFAULT 0,  -- local only: delivered tombstone came within 31 days\n", ""))
+            conn.execute("PRAGMA user_version = 2")
+        conn.close()
+        db = Database(path)
+        db.init_device("erin")
+        db.add_message("bob", "hi")
+        self.assertEqual(db.list("messages")[0]["received"], 0)
+
+    def test_schema_3_gains_sync_cursors(self):
+        path = Path(self.tmp.name) / "v3.db"
+        with sqlite3.connect(path) as conn:
+            conn.executescript(SCHEMA)
+            conn.execute("ALTER TABLE device_info DROP COLUMN last_push")
+            conn.execute("ALTER TABLE device_info DROP COLUMN server_cursor")
+            conn.execute("PRAGMA user_version = 3")
+        conn.close()
+        db = Database(path)
+        db.init_device("erin")
+        self.assertIsNone(db.update_device(last_push=5.0)["server_cursor"])
 
     def test_dead_message_is_not_picked_up(self):
         msg = self.alice.add_message("bob", "hi")
@@ -171,6 +225,7 @@ class ApiTest(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         app = Flask(__name__)
         app.config["DATABASE"] = Database(Path(self.tmp.name) / "api.db")
+        app.config["GLOBAL_DATABASE"] = GlobalDatabase(Path(self.tmp.name) / "global.db")
         app.register_blueprint(api)
         self.client = app.test_client()
 
@@ -216,6 +271,66 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(c.get("/api/nope").status_code, 404)
         self.assertEqual(c.post("/api/sync", json={"nope": []}).status_code, 400)
         self.assertEqual(c.post("/api/sync", json={"messages": [{"seq": 1}]}).status_code, 400)
+
+    def test_global_load(self):
+        c = self.client
+        spring = {"id": "w1", "category": "Water", "name": "Spring", "latitude": 1, "longitude": 2}
+        self.assertEqual(c.post("/api/global/load", json={}).status_code, 400)
+        self.assertEqual(c.post("/api/global/load", json={"locales": [spring]}).json, {"locales": 1, "trails": 0})
+        self.assertEqual(c.get("/api/global/locales").json[0]["category"], "water")
+        self.assertEqual(c.get("/api/global/categories").json, [{"category": "water", "count": 1}])
+        self.assertIsNotNone(c.get("/api/global/info").json["loaded_at"])
+        gpx = GlobalDatabaseTest.GPX
+        c.post("/api/global/load", json={"locales": [], "trails": [{"id": "t1", "name": "Loop", "gpx": gpx}]})
+        self.assertEqual(c.get("/api/global/trails").json[0]["name"], "Loop")
+        self.assertEqual(c.get("/api/global/trails/t1.gpx").get_data(as_text=True), gpx)
+        self.assertEqual(c.get("/api/global/trails/nope.gpx").status_code, 404)
+
+
+class GlobalDatabaseTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.db = GlobalDatabase(Path(self.tmp.name) / "global.db")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    @staticmethod
+    def locale(id, category="water"):
+        return {"id": id, "category": category, "name": id, "latitude": 1.0, "longitude": 2.0}
+
+    def test_load_replaces_everything(self):
+        self.assertIsNone(self.db.info()["loaded_at"])
+        self.db.load({"locales": [self.locale("a"), self.locale("b", "campsite")]})
+        self.db.load({"locales": [self.locale("c")]})
+        self.assertEqual([l["id"] for l in self.db.locales()], ["c"])
+        self.assertIsNotNone(self.db.info()["loaded_at"])
+
+    GPX = ('<gpx xmlns="http://www.topografix.com/GPX/1/1"><trk><trkseg>'
+           '<trkpt lat="29.0" lon="-82.0"/><trkpt lat="29.01" lon="-82.0"/>'
+           '</trkseg></trk></gpx>')
+
+    def test_trails(self):
+        self.db.load({"locales": [], "trails": [{"id": "t1", "name": "Loop", "gpx": self.GPX}]})
+        [trail] = self.db.trails()
+        self.assertEqual(trail["segments"], [[[29.0, -82.0], [29.01, -82.0]]])
+        self.assertAlmostEqual(trail["length_km"], 1.11, places=2)
+        self.assertEqual(self.db.trail_gpx("t1"), self.GPX)
+        # routes (rte/rtept) work too, without a namespace
+        self.db.load({"locales": [], "trails": [{"id": "t2", "name": "Route", "gpx":
+            '<gpx><rte><rtept lat="1" lon="2"/><rtept lat="3" lon="4"/></rte></gpx>'}]})
+        self.assertEqual([t["id"] for t in self.db.trails()], ["t2"])
+
+    def test_bad_gpx_is_refused(self):
+        for gpx in ("not xml", "<gpx><trk><trkseg><trkpt lat='1' lon='2'/></trkseg></trk></gpx>"):
+            with self.assertRaises(ValueError):
+                self.db.load({"locales": [], "trails": [{"id": "t", "name": "x", "gpx": gpx}]})
+
+    def test_bad_record_changes_nothing(self):
+        self.db.load({"locales": [self.locale("a")]})
+        with self.assertRaises(ValueError):
+            self.db.load({"locales": [self.locale("b"), {"id": "c"}]})
+        self.assertEqual([l["id"] for l in self.db.locales()], ["a"])
 
 
 if __name__ == "__main__":

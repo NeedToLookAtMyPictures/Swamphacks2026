@@ -29,7 +29,12 @@ function showTab(name) {
     p.classList.toggle("active", p.id === name));
 
   if (name === "map") {
-    if (!map) initMap();
+    if (!map) {
+      initMap();
+      initMapSettings();
+    } else {
+      refreshMapSettings();
+    }
     map.invalidateSize();  // Leaflet needs this after the container becomes visible
   }
   if (name === "messages") loadMessages();
@@ -40,3 +45,4 @@ document.querySelectorAll(".tab").forEach((t) =>
   t.addEventListener("click", () => showTab(t.dataset.tab)));
 
 loadMessages();  // Messages is the tab shown on load
+startLocationUpdates();

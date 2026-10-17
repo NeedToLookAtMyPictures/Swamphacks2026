@@ -25,7 +25,7 @@ TOMBSTONE_TTL = 2_678_400  # 31 days, in seconds
 # Each sync re-sends records from this long before the cursor, so a record written
 # while a sync was running isn't skipped. Merging is idempotent, so repeats are harmless.
 SYNC_OVERLAP = 60  # seconds
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 # Names are people's addresses: short (they go over LoRa) and compared ignoring case
 NAME_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS messages (
     content       TEXT    NOT NULL,
     is_dead       INTEGER NOT NULL DEFAULT 0,  -- set by age or by a tombstone
     time_received REAL    NOT NULL,
+    received      INTEGER NOT NULL DEFAULT 0,  -- local only: delivered tombstone came within 31 days
     PRIMARY KEY (origin_id, seq)
 );
 
@@ -143,10 +144,23 @@ class Database:
         with self._connect() as conn:
             version = conn.execute("PRAGMA user_version").fetchone()[0]
             has_tables = conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table'").fetchone()
-            if has_tables and version != SCHEMA_VERSION:
+            if has_tables and version in (2, 3):
+                self._add_missing_columns(conn)
+            elif has_tables and version != SCHEMA_VERSION:
                 raise RuntimeError(f"{self.path} uses an old schema; delete it and restart")
             conn.executescript(SCHEMA)
             conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+
+    @staticmethod
+    def _add_missing_columns(conn):
+        """Upgrade schema 2 (no messages.received) and 3 (no server sync cursors)."""
+        for table, column, definition in (
+                ("messages", "received", "INTEGER NOT NULL DEFAULT 0"),
+                ("device_info", "last_push", "REAL"),
+                ("device_info", "server_cursor", "REAL")):
+            existing = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+            if column not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
     @contextlib.contextmanager
     def _connect(self):
@@ -297,6 +311,12 @@ class Database:
         with self._connect() as conn:
             return [dict(r) for r in conn.execute(query + " ORDER BY time_created", params)]
 
+    def get_location(self, user):
+        """A user's last known position, or None."""
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM geolocations WHERE user = ?", (user,)).fetchone()
+        return dict(row) if row else None
+
     def contacts(self):
         """Everyone this device knows about, from any data it holds, except itself.
 
@@ -339,6 +359,7 @@ class Database:
         for rows in data.values():
             for row in rows:
                 row.pop("time_received", None)  # local bookkeeping only
+                row.pop("received", None)
         return data
 
     def changes(self, cursor=None):
@@ -424,8 +445,12 @@ class Database:
         return self._insert(conn, "messages", record)
 
     def _apply_tombstone(self, conn, tombstone):
-        conn.execute("UPDATE messages SET is_dead = 1 WHERE origin_id = ? AND seq = ?",
-                     (tombstone["target_origin_id"], tombstone["target_seq"]))
+        # A delivered tombstone arriving before the message expires proves it was
+        # received; after that, the sender can only tell it was received or died
+        conn.execute("UPDATE messages SET is_dead = 1, received = received OR "
+                     "(? = 'delivered' AND time_created >= ?) WHERE origin_id = ? AND seq = ?",
+                     (tombstone["reason"], time.time() - MESSAGE_TTL,
+                      tombstone["target_origin_id"], tombstone["target_seq"]))
 
     def _upsert_geolocation(self, conn, record):
         """Keep only the newest position per user; ties go to the higher device ID."""

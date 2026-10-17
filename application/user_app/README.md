@@ -15,7 +15,7 @@ tiles for offline use, so we don't use them.)
 ```bash
 cd application/user_app
 pip install -r requirements.txt
-python download_locales.py map    # Gainesville, FL, zoom 8-15 (a few MB)
+python download_locales.py map    # Gainesville to Hawthorne, FL, zoom 8-15
 ```
 
 `download_locales.py map` finds the latest daily Protomaps world build, uses HTTP range
@@ -42,6 +42,27 @@ python main.py --server http://<server>:8000   # also sync with the server whene
 With `--server` (or `SERVER_URL` set), a background thread tries the server every
 30 seconds and syncs whenever it answers. The app keeps working offline. See
 `../server/README.md`.
+python main.py --host 0.0.0.0 --https   # same, over HTTPS (needed for GPS, see below)
+```
+
+### Raspberry Pi + phone over Bluetooth
+
+When the app runs on a Raspberry Pi and a phone opens it in its browser over a
+Bluetooth network connection, the position comes from the **phone's** GPS
+through the browser. Browsers only allow that on `localhost` or HTTPS, so run
+the Pi with `--https`:
+
+```bash
+python main.py --host 0.0.0.0 --https
+```
+
+Then on the phone open `https://<pi-ip>:5000` (`hostname -I` on the Pi shows
+its IPs). The first run creates a self-signed certificate in `data/cert.pem` /
+`data/key.pem` (needs the `openssl` command, preinstalled on Raspberry Pi OS).
+There's no internet to get a real certificate, so the phone warns that the
+connection isn't private: tap **Advanced → Proceed** once, then allow location
+when asked. The certificate is kept, so it's only accepted once per phone;
+delete the two files to make a new one (for example if the Pi's name changed).
 
 ## Database
 
@@ -62,7 +83,11 @@ Every record this device creates gets `origin_id = device_id` and the next
 
 When a message addressed to you arrives (through `POST /api/sync` / `merge()`),
 it is marked delivered automatically: your device creates a `delivered`
-tombstone, which spreads and kills the message on every other device.
+tombstone, which spreads and kills the message on every other device. When
+that tombstone reaches the sender within 31 days of the message being sent, the
+sender's copy is marked `received` (a local column, never shared); a message
+that died any other way shows as "received or died", since the sender can't
+tell which.
 
 People are identified by their **name**, which is unique between people and
 can't be changed (1-32 letters, digits, `_` or `-`, compared ignoring case).
@@ -73,7 +98,7 @@ until the one with that name sees it. A message with receiver `*` goes to
 days. (`*` isn't a valid name, so no person can be called that.) Offline, the app can only refuse names
 it has already seen, so real uniqueness has to come from the server at setup.
 
-If you have a `data/user.db` from an older schema, delete it (the app refuses to start with one). Expired messages are deleted, except on the sender's and receiver's
+A `data/user.db` from schema 2 or 3 is upgraded automatically; anything older has to be deleted. Expired messages are deleted, except on the sender's and receiver's
 devices, where they're kept (marked dead) but no longer shared.
 
 ### API
@@ -99,10 +124,75 @@ All endpoints take and return JSON. Full list in `api.py`.
 curl -X POST localhost:5000/api/device -H 'content-type: application/json' -d '{"name": "Jordan"}'
 ```
 
-Tests: `python -m unittest test_database`
+### Global database
+
+`global_database.py` keeps a second SQLite database at `data/global.db`
+(git-ignored) for data set by the company. It is loaded once from the server
+at setup; users never change it.
+
+| Table | Key | Notes |
+|---|---|---|
+| `global_locales` | id | fixed places: `category` (water, campsite, ...), `name`, `latitude`, `longitude`, `description` |
+| `global_trails` | id | routes: `name`, `description`, `gpx` (the GPX document as sent) |
+| `global_info` | single row | `loaded_at`: when the data was loaded |
+
+A global locale's `id` is what user `locales` records (reviews/comments) put in
+their `location`.
+
+The server sends `POST /api/global/load` with
+`{locales: [...], trails: [{id, name, description?, gpx}]}`, which replaces
+everything. GPX tracks (`trkseg`/`trkpt`) and routes (`rte`/`rtept`) are read;
+a trail whose GPX has no line of at least 2 points is refused. Until the server
+exists, load the example file (real Gainesville parks with made-up amenities: 24
+locales in 6 categories, plus 3 approximate trails from `sample_trails/`; in a
+file a trail can give `gpx_file` instead of the GPX text):
+
+```bash
+python global_database.py load sample_global_locales.json
+```
+
+| Method | Path | What it does |
+|---|---|---|
+| GET | `/api/global/locales?category=` | global locales, sorted by category then name |
+| GET | `/api/global/categories` | each category with its count |
+| GET | `/api/global/trails` | trails with their line parsed from the GPX (`segments` of `[lat, lon]`) and `length_km` |
+| GET | `/api/global/trails/<id>.gpx` | a trail's original GPX file |
+| GET | `/api/global/info` | when the global data was loaded |
+| POST | `/api/global/load` | load the data from the server (replaces everything) |
+| GET | `/api/distances?from=&to=` | walking distance along the trails to global locales, nearest first (see below) |
+
+### Distances along trails
+
+Distances to locales are measured the way a hiker walks them
+(`trail_distance.py`): straight from where you are to the nearest point on a
+trail, along the global trails (shortest path), then straight from the trail to
+the locale. Trails are connected where they share a point, and where the end of
+one comes within 30 m of another. A locale on a trail that isn't connected to
+yours gets only a straight-line distance.
+
+`GET /api/distances` measures from your last position (`PUT /api/location`), or
+`from=<global locale id>` or `from=<lat>,<lon>`; `to=<global locale id>` limits
+it to one locale. Each locale comes back with `distance` (total), `to_trail`,
+`along_trail`, `from_trail` and `straight`, all in meters (`null` when no trail
+connects), and `path`, the route as `[lat, lon]` points.
+
+Tests: `python -m unittest test_database test_trail_distance`
+
+## Location
+
+While the app is open, `static/location.js` reads the device's position from
+the browser once a minute and saves it with `PUT /api/location`. This works
+offline on devices with GPS (phones); laptops without GPS usually need internet
+to locate themselves. Browsers only allow geolocation on `localhost` or HTTPS,
+so opening the app from another device over plain `http://<lan-ip>` won't report
+a position; start the server with `--https` for that (see Raspberry Pi above). Updates pause while the tab is hidden or the phone is locked.
 
 ## Tabs
 
-- **Messages**: the To dropdown lists everyone in your GPS data, plus Everyone and Other (type any name); shows messages you sent, received, and broadcasts
-- **Map**: offline Leaflet map
-- **Debug**: shows every table in the local database (refresh button; offers to create the device if it has no identity yet)
+- **Messages**: a sidebar with one conversation per person you've messaged with, with Everyone pinned to the top; click one to see its history and send to that person. The New chat dropdown lists everyone in your GPS data (newest first), or Other to type any name
+- **Map**: offline Leaflet map. The gear button opens Settings:
+  - **Last known location**: search people and check who to pin, with their name and when they were last seen
+  - **Trails**: select a global trail (with search) to draw it on the map and zoom to it; only the selected trail is shown
+  - **Locales**: the global locales (shown by default), grouped by category; show or hide a whole category or single locales, with search
+  - Clicking a global locale shrinks the map to the top half and opens a panel below it with information about the site (description, coordinates, distance along the trails from your last location, comment count) and its comments, newest first, with a box to add one. Comments are user `locales` records with `location` set to the site's id, so they sync like other records
+- **Debug**: shows every table in the local and global databases (refresh button; offers to create the device if it has no identity yet)
