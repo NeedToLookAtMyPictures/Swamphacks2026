@@ -15,7 +15,7 @@ tiles for offline use, so we don't use them.)
 ```bash
 cd application/user_app
 pip install -r requirements.txt
-python download_locales.py map    # Gainesville, FL, zoom 8-15 (a few MB)
+python download_locales.py map    # Gainesville to Hawthorne, FL, zoom 8-15
 ```
 
 `download_locales.py map` finds the latest daily Protomaps world build, uses HTTP range

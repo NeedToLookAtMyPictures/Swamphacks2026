@@ -1,7 +1,7 @@
 """Download data the user app needs while offline.
 
 Run this once while you have internet:
-    python download_locales.py map            # Gainesville, FL basemap (default)
+    python download_locales.py map            # Gainesville to Hawthorne, FL basemap (default)
     python download_locales.py map --place "Ocala, Florida"
     python download_locales.py map --bbox -82.42 29.59 -82.25 29.73 --max-zoom 15
 
@@ -39,9 +39,10 @@ PROTOMAPS_BUILD_URL = "https://build.protomaps.com/{key}"
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 USER_AGENT = "Swamphacks2026-UserApp/0.2 (+https://github.com/NeedToLookAtMyPictures/Swamphacks2026)"
 
-# Gainesville, Florida (min_lon, min_lat, max_lon, max_lat)
-DEFAULT_PLACE = "Gainesville, Florida"
-DEFAULT_BBOX = (-82.42, 29.59, -82.25, 29.73)
+# Gainesville east to Hawthorne, Florida, along the Gainesville-Hawthorne Trail
+# (min_lon, min_lat, max_lon, max_lat)
+DEFAULT_PLACE = "Gainesville to Hawthorne, Florida"
+DEFAULT_BBOX = (-82.42, 29.56, -82.05, 29.73)
 
 
 # ---------------------------------------------------------------------------
