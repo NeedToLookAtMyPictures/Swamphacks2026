@@ -14,6 +14,7 @@ from enum import IntEnum
 from .records import ID_LEN
 
 PROTOCOL_VERSION = 1
+MAX_FRAME = 250  # ESP-NOW v1 payload limit; no frame we send may exceed it
 
 
 class T(IntEnum):
@@ -36,6 +37,7 @@ HELLO = struct.Struct("<BI")  # version, last_server_sync
 ACK = struct.Struct("<II")  # next expected seq (cumulative), selective-ack bitmap of the 32 after it
 INV_ENTRY = struct.Struct(f"<{ID_LEN}sBI")  # id, kind, created
 DATA_HDR = struct.Struct(f"<{ID_LEN}sHH")  # record id, chunk index, chunk count
+MAX_CHUNKS = 0xFFFF  # chunk count is a u16
 
 
 @dataclass

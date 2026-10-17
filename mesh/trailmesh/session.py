@@ -14,6 +14,7 @@ directly, which keeps it testable and link-agnostic (ESP-NOW now, LoRa later).
 from __future__ import annotations
 
 import math
+import struct
 from collections import deque
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Callable
@@ -21,7 +22,19 @@ from typing import TYPE_CHECKING, Callable
 from .records import ID_LEN, PRIORITY, Record
 from .reliable import ReliableReceiver, ReliableSender, RetriesExhausted
 from .store import RecordStore
-from .wire import DATA_HDR, FLAG_LAST, HEADER, HELLO, INV_ENTRY, PROTOCOL_VERSION, RELIABLE, Frame, T
+from .wire import (
+    DATA_HDR,
+    FLAG_LAST,
+    HEADER,
+    HELLO,
+    INV_ENTRY,
+    MAX_CHUNKS,
+    MAX_FRAME,
+    PROTOCOL_VERSION,
+    RELIABLE,
+    Frame,
+    T,
+)
 
 if TYPE_CHECKING:
     from .node import Config
@@ -56,7 +69,7 @@ class Session:
         self.initiator = initiator
         self.store = store
         self.cfg = config
-        self.mtu = mtu
+        self.mtu = min(mtu, MAX_FRAME)  # every frame we build fits one ESP-NOW packet
         self._send = send
         self._on_record = on_record
         self.started = now
@@ -72,7 +85,7 @@ class Session:
         self._peer_inv: list[tuple[bytes, int, int]] = []
         self._peer_wants: list[bytes] = []
         self._wanted: set[bytes] = set()
-        self._partial: dict[bytes, dict[int, bytes]] = {}
+        self._partial: dict[bytes, tuple[int, dict[int, bytes]]] = {}  # id -> (count, index -> chunk)
         self.records_received = 0
         self.records_sent = 0
 
@@ -143,14 +156,19 @@ class Session:
             if len(f.payload) < DATA_HDR.size:
                 return
             rid, idx, count = DATA_HDR.unpack_from(f.payload)
-            if rid not in self._wanted:
+            if rid not in self._wanted or not idx < count:
                 return
-            chunks = self._partial.setdefault(rid, {})
+            expected_count, chunks = self._partial.setdefault(rid, (count, {}))
+            if count != expected_count:
+                return  # inconsistent with this record's earlier chunks
             chunks[idx] = f.payload[DATA_HDR.size :]
             if len(chunks) == count:
                 del self._partial[rid]
                 self._wanted.discard(rid)
-                rec = Record.decode(b"".join(chunks[i] for i in range(count)))
+                try:
+                    rec = Record.decode(b"".join(chunks[i] for i in range(count)))
+                except (struct.error, ValueError):
+                    return  # malformed; drop it
                 if rec.id != rid:
                     return  # corrupted or forged; drop it
                 if self.store.put(rec):
@@ -179,6 +197,8 @@ class Session:
         for rec in recs:
             blob = rec.encode()
             count = max(1, math.ceil(len(blob) / size))
+            if count > MAX_CHUNKS:
+                continue  # over ~14.8 MB on ESP-NOW; can't be indexed with a u16
             for i in range(count):
                 yield T.DATA, 0, DATA_HDR.pack(rec.id, i, count) + blob[i * size : (i + 1) * size]
             self.records_sent += 1

@@ -80,7 +80,8 @@ interleave. The diagram shows one possible order.
   chooses it. Both the "lower id initiates" rule and the firmware filter use it.
 - **record**: one immutable piece of data (locale update, message or
   pin). Its id is a hash of its contents.
-- **frame**: one radio packet, at most `link.mtu` bytes (250 for ESP-NOW).
+- **frame**: one radio packet, at most `min(link.mtu, 250)` bytes. A record
+  bigger than one frame is split into chunks across many frames.
 - **window**: the short, scheduled time when every device's radio is on for discovery.
 - **session**: one exchange with one peer, from HELLO to DONE or failure.
 - **last_server_sync**: when this device last downloaded from the server.
@@ -125,8 +126,6 @@ Each item links to the doc that explains it.
 
 Each one is detailed in its file's doc.
 
-- A malformed DATA payload can raise an exception out of `Node.poll()`, which
-  would stop the main loop. ([session.md](session.md))
 - A device that refuses some kinds (`accept_kinds`) never matches its peer's
   digest, so it re-syncs with that peer every time the cooldown expires.
   ([node.md](node.md))

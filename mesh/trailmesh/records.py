@@ -44,6 +44,10 @@ class Record:
     # cutoff. Not part of the id, since it gets filled in after authoring.
     server_time: int = 0
 
+    def __post_init__(self):
+        if len(self.key) > 255:
+            raise ValueError("key is longer than 255 bytes")  # its length is encoded in one byte
+
     @cached_property
     def id(self) -> bytes:
         h = hashlib.sha256()
@@ -61,6 +65,7 @@ class Record:
 
     @classmethod
     def decode(cls, data: bytes) -> Record:
+        """Raises struct.error or ValueError on malformed input."""
         kind, origin, created, server_time, klen = _HDR.unpack_from(data)
         off = _HDR.size
         return cls(Kind(kind), origin, created, data[off + klen :], data[off : off + klen], server_time)

@@ -50,7 +50,8 @@ the window until the exchange ends.
 1. cutoff = min(both last server syncs)
 2. INV: `(id, kind, created)` of every record eligible under the cutoff
 3. WANT: ids from the peer's INV that I don't have
-4. DATA: wanted records, chunked to fit the MTU, highest priority first
+4. DATA: wanted records, split into chunks so every frame is ≤ 250 bytes
+   (any record size, e.g. 1 MB = 4 425 frames), highest priority first
    (locale updates, messages, pins), then DONE
 
 Every INV/WANT/DATA/DONE frame is reliable (seq + ACK with a 32-bit selective-ack
