@@ -39,7 +39,7 @@ All through the app's public `Database` API:
 | `has(id)` | `export()` | True if we hold the record **or** a tombstone we hold has killed it |
 | `get(id)` | `export()` | The record, to send it |
 | `put(record)` | `merge()` | Hand a peer's record to the app; True if anything changed |
-| `digest()` | `export()` | XOR of the ids of everything relayable |
+| `digests()` | `export()` | XOR of the ids of everything relayable: (all but positions, positions). `digest()` XORs the two. |
 | `last_server_sync` | `get_device()` / `update_device()` | From the app's `device_info` |
 | `mesh_id` | `device_id` | The u32 used on the air (see below) |
 | `device_id` | `device_id` | The app's device id string |

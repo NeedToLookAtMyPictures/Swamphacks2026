@@ -80,6 +80,7 @@ class LinkLost(ConnectionError):
 
 class EspNowSerialLink(Link):
     mtu = 250  # ESP-NOW v1 limit; works with every ESP-IDF version
+    radio_on_at_start = True
 
     def __init__(self, port: str = "auto", baud: int = 460800, log=print, reconnect_interval: float = 1.0):
         """port: see transport.open_transport ("auto", "COM3", "/dev/ttyACM0", "termux-usb", ...).
@@ -101,7 +102,7 @@ class EspNowSerialLink(Link):
         self.dropped_writes = 0  # frames discarded while the board was disconnected
         # What the host wants the board to be doing. Re-sent after every (re)connect,
         # because the board forgets everything when it is unplugged or reset.
-        self._radio_wanted = True
+        self._radio_wanted = self.radio_on_at_start
         self._partner: int | None = None
         self._open()
         self._stop = threading.Event()
@@ -126,11 +127,13 @@ class EspNowSerialLink(Link):
         with self._lock:
             self._transport = t
             self._reconnectable = t.reconnectable
-        # Clear any partner filter left over from an interrupted session, restore
-        # the radio state, and ask who we're talking to.
+        self._restore()
+        self._write(bytes([CMD_GET_INFO]))  # ask who we're talking to
+
+    def _restore(self) -> None:
+        """Clear any partner filter left over from an interrupted session and restore the radio state."""
         self._write(bytes([CMD_SET_PARTNER]) + struct.pack("<I", self._partner or 0))
         self._write(bytes([CMD_RADIO, 1 if self._radio_wanted else 0]))
-        self._write(bytes([CMD_GET_INFO]))
 
     def _lost(self, err: Exception) -> None:
         with self._lock:
@@ -194,11 +197,19 @@ class EspNowSerialLink(Link):
         if msg[0] == EVT_RECV and len(msg) >= 8:
             self._rx.put(RxFrame(msg[8:], msg[1:7], struct.unpack("b", msg[7:8])[0]))
         elif msg[0] == EVT_INFO and len(msg) >= 7:
-            self.mac = msg[1:7]
-            if len(msg) >= 7 + STATUS.size:
-                self.status = dict(zip(STATUS_FIELDS, STATUS.unpack_from(msg, 7)))
+            self._on_info(msg)
         elif msg[0] == EVT_LOG:
             self._emit("[esp32]", msg[1:].decode(errors="replace"))
+        else:
+            self._on_event(msg)
+
+    def _on_event(self, msg: bytes) -> None:
+        """Board messages this class doesn't know (subclasses for other firmware)."""
+
+    def _on_info(self, msg: bytes) -> None:
+        self.mac = msg[1:7]
+        if len(msg) >= 7 + STATUS.size:
+            self.status = dict(zip(STATUS_FIELDS, STATUS.unpack_from(msg, 7)))
 
     def send(self, payload: bytes, dest: bytes | None = None) -> None:
         if len(payload) > self.mtu:

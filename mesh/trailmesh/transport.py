@@ -30,7 +30,7 @@ ESP_USB_VIDS = {
 # Other gadgets use these chips too, so they are only tried when no board
 # above is plugged in.
 USB_UART_BRIDGE_VIDS = {
-    0x10C4,  # Silicon Labs CP210x
+    0x10C4,  # Silicon Labs CP210x (the Heltec WiFi LoRa 32 V3's CP2102)
     0x1A86,  # WCH CH340 / CH9102
     0x0403,  # FTDI
 }

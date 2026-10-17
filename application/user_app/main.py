@@ -112,7 +112,7 @@ def ensure_certificate():
     print(f"Created a self-signed certificate in {DATA_DIR} for {', '.join(names + ips)}")
 
 
-def start_mesh(db, serial_port, demo):
+def start_mesh(db, serial_port, demo, board_kind="espnow", radio="auto"):
     """Run a mesh node on this app's database in a background thread.
 
     The board is opened right away, here on the main thread: on Android that
@@ -121,29 +121,32 @@ def start_mesh(db, serial_port, demo):
     the web interface), since the mesh identifies devices by it.
     """
     sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "mesh"))
-    from trailmesh import AppStore, Config, Node
-    from trailmesh.espnow_serial import EspNowSerialLink, LinkLost
+    from trailmesh import AppStore
+    from trailmesh.espnow_serial import LinkLost
+    from trailmesh.radio import build_node, open_board
     from trailmesh.transport import TransportError
 
     def mesh_log(*msg):
         print("[mesh]", *msg, flush=True)
 
     try:
-        link = EspNowSerialLink(serial_port, log=mesh_log)
+        board = open_board(board_kind, serial_port, log=mesh_log)
     except TransportError as e:
         sys.exit(f"can't open the mesh board: {e}")
-    link.set_radio(False)  # the node turns it on when it starts
+    board.set_radio(False)  # the node turns on the radio it uses when it starts
 
     def worker():
         while db.get_device() is None:
             time.sleep(1)
-        node = Node(
-            link, AppStore(db), Config(always_on=demo),
+        node = build_node(
+            board, AppStore(db), radio=radio, config=dict(always_on=demo),
             on_record=lambda r: mesh_log(f"received {r.kind.name.lower()} from the mesh"),
             on_delivered=lambda origin, seq: mesh_log(f"message {origin}/{seq} was delivered"),
-            on_session_end=lambda s: mesh_log(f"sync with node {s.peer_id:08x} {'ok' if s.ok else 'failed'}"),
+            on_session_end=lambda s: mesh_log(
+                f"sync with node {s.peer_id:08x} over {'ESP-NOW' if s.fast or node.link is board else 'LoRa'} "
+                f"{'ok' if s.ok else 'failed'}"),
         )
-        mesh_log(f"node {node.id:08x} running on {serial_port}")
+        mesh_log(f"node {node.id:08x} running on {serial_port} ({board_kind}, radio {radio})")
         try:
             node.run_forever()
         except LinkLost as e:
@@ -178,7 +181,7 @@ def run(args):
     if args.mesh_port:
         if args.debug:
             sys.exit("--mesh-port can't be combined with --debug (the reloader would open the board twice)")
-        start_mesh(app.config["DATABASE"], args.mesh_port, args.mesh_demo)
+        start_mesh(app.config["DATABASE"], args.mesh_port, args.mesh_demo, args.mesh_board, args.mesh_radio)
     finder = server_sync.ServerFinder(args.server, lan=not args.no_lan)
     app.config["SERVER"] = finder
     # With --debug the reloader runs this twice; only sync from the process that serves
@@ -217,6 +220,10 @@ def main():
                         help="running on an Android phone in Termux: reach the board through termux-usb "
                              "(the default --mesh-port then) instead of a serial port")
     parser.add_argument("--mesh-demo", action="store_true", help="mesh radio always on (instant discovery)")
+    parser.add_argument("--mesh-board", choices=("espnow", "heltec"), default="espnow",
+                        help="espnow: an ESP32 with espnow_bridge; heltec: a Heltec LoRa 32 V3 with heltec_bridge")
+    parser.add_argument("--mesh-radio", choices=("auto", "lora", "espnow"), default="auto",
+                        help="heltec only. auto: LoRa, switching to ESP-NOW within 60 m; lora / espnow: that radio only")
     run(parser.parse_args())
 
 

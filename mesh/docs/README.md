@@ -15,9 +15,10 @@ gaps.
 | [reliable.md](reliable.md) | `trailmesh/reliable.py` | ACKs, retransmission, in-order delivery |
 | [session.md](session.md) | `trailmesh/session.py` | One exchange between two devices |
 | [node.md](node.md) | `trailmesh/node.py` | Duty cycle, discovery, choosing who to talk to |
-| [link.md](link.md) | `trailmesh/link.py` | The radio interface (ESP-NOW now, LoRa later) |
+| [link.md](link.md) | `trailmesh/link.py` | The radio interface (ESP-NOW and LoRa) |
 | [espnow_serial.md](espnow_serial.md) | `trailmesh/espnow_serial.py` | Python side of the USB link to the ESP32 |
 | [firmware.md](firmware.md) | `firmware/espnow_bridge/espnow_bridge.ino` | ESP32 side: radio bridge and partner filter |
+| [lora.md](lora.md) | `firmware/heltec_bridge/`, `trailmesh/heltec_serial.py`, `lora.py`, `radio.py` | Heltec V3 (LoRa + ESP-NOW): firmware, the 60 m switch, radio modes |
 | [sim.md](sim.md) | `trailmesh/sim.py` | The fake radio used by tests |
 | [tests.md](tests.md) | `tests/` | What each test proves, and what it does not |
 
