@@ -24,6 +24,20 @@ function showSettingsView(name) {
   }
 }
 
+function timeAgo(seconds) {
+  const mins = Math.round((Date.now() / 1000 - seconds) / 60);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins} min ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours} hr ago`;
+  const days = Math.round(hours / 24);
+  return `${days} day${days === 1 ? "" : "s"} ago`;
+}
+
+function lastSeenText(g) {
+  return `Last seen ${timeAgo(g.time_created)} · ${new Date(g.time_created * 1000).toLocaleString()}`;
+}
+
 function personLabel(name) {
   return myMapName && name.toLowerCase() === myMapName.toLowerCase() ? `${name} (you)` : name;
 }
@@ -62,7 +76,7 @@ function renderLastKnownList() {
     });
     const text = settingsEl("span");
     text.appendChild(settingsEl("span", personLabel(g.user), "settings-person-name"));
-    text.appendChild(settingsEl("span", new Date(g.time_created * 1000).toLocaleString(), "settings-person-time"));
+    text.appendChild(settingsEl("span", lastSeenText(g), "settings-person-time"));
     row.append(checkbox, text);
     return row;
   }));
@@ -73,10 +87,14 @@ function drawLastKnownPins() {
   lastKnownLayer = L.layerGroup(lastKnownPeople
     .filter((g) => lastKnownShown.has(g.user.toLowerCase()))
     .map((g) => {
-      const popup = settingsEl("div");
-      popup.appendChild(settingsEl("strong", personLabel(g.user)));
-      popup.appendChild(settingsEl("div", `Last seen ${new Date(g.time_created * 1000).toLocaleString()}`));
-      return L.marker([g.latitude, g.longitude], { title: g.user }).bindPopup(popup);
+      // Name and time always shown above the pin
+      const label = settingsEl("div");
+      label.appendChild(settingsEl("strong", personLabel(g.user)));
+      label.appendChild(settingsEl("div", `Last seen ${timeAgo(g.time_created)}`));
+      label.appendChild(settingsEl("div", new Date(g.time_created * 1000).toLocaleString()));
+      return L.marker([g.latitude, g.longitude], { title: g.user })
+        // the default icon's tooltip anchor sits right of the pin; center it just above the pin
+        .bindTooltip(label, { permanent: true, direction: "top", offset: [-16, -14], className: "pin-label" });
     })).addTo(map);
 }
 

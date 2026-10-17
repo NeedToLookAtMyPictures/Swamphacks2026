@@ -366,3 +366,4 @@ main {
 .settings-person-name { display: block; font-weight: 600; }
 .settings-person-time { display: block; font-size: 13px; color: #666; }
 .settings-empty { margin: 6px 4px; color: #888; font-size: 14px; }
+.pin-label { text-align: center; font-size: 12px; }
