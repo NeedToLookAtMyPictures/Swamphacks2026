@@ -23,7 +23,7 @@ mesh/
 ## Quick start
 
 ```bash
-pip install pyserial
+pip install -r requirements.txt
 # flash firmware/espnow_bridge to two ESP32s (Arduino-ESP32 core 3.x), then:
 python examples/run_node.py --port /dev/ttyUSB0 --id 1 --demo --post "spring at mile 1203 is dry"
 python examples/run_node.py --port /dev/ttyUSB1 --id 2 --demo

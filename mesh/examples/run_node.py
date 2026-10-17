@@ -1,6 +1,6 @@
 """Run one trailmesh node against a real ESP32 running firmware/espnow_bridge.
 
-    pip install pyserial
+    pip install -r requirements.txt
     python examples/run_node.py --port /dev/ttyUSB0 --id 1 --post "spring at mile 1203 is dry"
     python examples/run_node.py --port /dev/ttyUSB1 --id 2
 
