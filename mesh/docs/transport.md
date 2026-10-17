@@ -7,17 +7,25 @@ which transport is in use.
 
 | Transport | Where | How |
 |---|---|---|
-| `PySerialTransport` (transport.py) | Windows, macOS, Linux | Opens the board's USB CDC port with pyserial (`COM3`, `/dev/ttyACM0`, `/dev/cu.usbmodem...`). Also pyserial URLs such as `socket://127.0.0.1:5000`, used by the tests. |
-| `TermuxUsbTransport` (termux_usb.py) | Android, in Termux | Android apps can't open serial ports. `termux-usb` hands the program a USB file descriptor; this transport drives the board's USB CDC interface through libusb. |
+| `PySerialTransport` (transport.py) | Windows, macOS, Linux | Opens the board's USB serial port with pyserial (`COM3`, `/dev/ttyACM0`, `/dev/ttyUSB0`, `/dev/cu.usbmodem...`). Also pyserial URLs such as `socket://127.0.0.1:5000`, used by the tests. |
+| `TermuxUsbTransport` (termux_usb.py) | Android, in Termux | Android apps can't open serial ports. `termux-usb` hands the program a USB file descriptor; this transport drives the board's USB serial interface through libusb. |
 
-Both talk to the **same USB interface** on the board (USB CDC, the standard
-"virtual serial port" class), so the firmware is the same everywhere.
+Both talk to the **same USB interface** on the board, so the firmware is the
+same everywhere. Two kinds of USB serial port are supported:
+
+| Board | USB serial | Notes |
+|---|---|---|
+| Adafruit Feather ESP32-S3, generic ESP32-S3FN8 | USB CDC (the chip's native USB, standard class) | Baud rate ignored |
+| Heltec WiFi LoRa 32 V3 | Silicon Labs CP2102 USB-UART chip (vendor 0x10C4, its own protocol) | Baud rate is real: host and firmware both use 460800. Firmware must be built with USB CDC On Boot **Disabled** (see [firmware.md](firmware.md)). |
+
+Other USB-UART chips (CH340, FTDI) aren't implemented on Android; on a laptop
+pyserial handles them, but `--port auto` won't find them.
 
 ## Choosing a transport: the port string
 
 | `port` | Transport |
 |---|---|
-| `auto` (default) | Android: Termux, the one USB device plugged in. Elsewhere: pyserial, the one port whose USB vendor is Espressif (0x303A) or Adafruit (0x239A). |
+| `auto` (default) | Android: Termux, the one USB device plugged in. Elsewhere: pyserial, the one port whose USB vendor is Espressif (0x303A), Adafruit (0x239A) or Silicon Labs (0x10C4, CP210x). |
 | `termux-usb` | Termux, the one USB device plugged in |
 | `/dev/bus/usb/001/002` | Termux, that device (from `termux-usb -l`) |
 | anything else | pyserial |
@@ -61,8 +69,12 @@ Nothing in the link or the protocol changes.
    exit code. Ctrl-c goes to the rerun.
 3. In the rerun, `TERMUX_USB_FD` holds the device's file descriptor. The
    transport wraps it with libusb (with device discovery off, since that
-   needs root), finds the CDC interfaces in the configuration descriptor,
-   claims them, clears the endpoints, and turns DTR on (RTS off).
+   needs root) and reads the device and configuration descriptors.
+   - **CDC:** claims the CDC interfaces, clears the endpoints, and turns DTR on (RTS off).
+   - **CP210x** (vendor 0x10C4, no CDC interface): claims its one vendor
+     interface, enables the UART, sets the baud rate and 8N1, and turns DTR and
+     RTS **off**. On the Heltec V3, DTR/RTS drive the ESP32's EN and IO0 pins
+     (auto-flash circuit); with both off the board runs normally.
 
 **Limits:**
 
@@ -80,7 +92,7 @@ Nothing in the link or the protocol changes.
   quoted, but this hasn't been tested on every Termux version: avoid spaces in
   paths if a rerun misbehaves.
 
-**Not done:** USB CDC on Android hasn't run on a phone yet. The descriptor parsing,
+**Not done:** neither USB CDC nor CP210x on Android has run on a phone yet. The descriptor parsing,
 the rerun and the link's lost-board handling are unit-tested
 (`tests/test_transport.py`), and the libusb calls were checked against a real
 libusb on Linux, but not with a board attached.

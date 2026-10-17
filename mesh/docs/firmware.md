@@ -14,7 +14,7 @@ the partner filter from issue #2 ("ESP-NOW packet filtering").
 | Name | Value | Notes |
 |---|---|---|
 | `CHANNEL` | 6 | **All devices must use the same Wi-Fi channel** (6 matches esp-now-modem) |
-| `BAUD` | 460800 | Ignored on the ESP32-S3's native USB, which all our boards now use. Only mattered for the old ESP-WROOM boards with a USB-UART chip. |
+| `BAUD` | 460800 | Ignored on the ESP32-S3's native USB (Feather S3). Real on boards with a USB-UART chip (Heltec V3's CP2102): the host must use the same rate, which it does by default. |
 | Receive queue | 32 items | Frames are dropped (and counted) if the host falls behind |
 
 ## Control flow
@@ -163,6 +163,27 @@ board definition of its own, use **ESP32S3 Dev Module** and set:
 
 If the board has two USB ports, plug into the one wired to the chip's own USB
 (usually labeled USB, not UART/COM).
+
+## Flashing the Heltec WiFi LoRa 32 V3
+
+ESP32-S3 with an SX1262 LoRa radio (not used by this firmware: the bridge is
+ESP-NOW over the ESP32's Wi-Fi radio). Its USB-C port is **not** the chip's
+native USB: it goes through a **Silicon Labs CP2102** USB-UART chip, so the
+host sees `/dev/ttyUSB0` (Linux), a "CP210x" COM port (Windows, may need the
+Silicon Labs driver), and on Android the Termux transport's CP210x driver.
+
+Board: **Heltec WiFi LoRa 32(V3)** (from the Heltec or the stock esp32 board
+package), or **ESP32S3 Dev Module**. Either way:
+
+- **USB CDC On Boot: Disabled.** Required, the opposite of the generic board
+  above. `Serial` must go to UART0, which is wired to the CP2102. With it
+  Enabled, `Serial` goes to native USB pins that aren't connected to the port,
+  and the host hears nothing.
+- Flash Size: 8MB.
+- Boards often ship with Meshtastic or Heltec's factory demo installed, so
+  flash the bridge before trying the host.
+- Uploading resets the board automatically (the CP2102's DTR/RTS drive EN and
+  IO0). If an upload can't connect, hold PRG, tap RST, release PRG, and retry.
 
 ## Things to verify on first flash
 

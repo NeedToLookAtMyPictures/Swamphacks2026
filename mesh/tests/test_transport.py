@@ -184,6 +184,19 @@ class CdcDescriptor(unittest.TestCase):
         with self.assertRaises(TransportError):
             termux_usb.find_cdc(config(interface(0, 0xFF, 2), endpoint(0x01, 2), endpoint(0x81, 2)))
 
+    def test_cdc_on_any_vendor(self):
+        cfg = config(interface(0, 2, 1), endpoint(0x82, 3), interface(1, 10, 2), endpoint(0x01, 2), endpoint(0x81, 2))
+        self.assertEqual(termux_usb.find_serial(0x303A, cfg), ("cdc", 0, 1, 0x81, 0x01))
+
+    def test_cp2102(self):  # Heltec WiFi LoRa 32 V3: one vendor-class interface with a bulk pair
+        cfg = config(interface(0, 0xFF, 2), endpoint(0x81, 2), endpoint(0x01, 2))
+        self.assertEqual(termux_usb.find_serial(0x10C4, cfg), ("cp210x", 0, 0, 0x81, 0x01))
+
+    def test_vendor_interface_from_unknown_chip(self):  # e.g. a CH340, whose protocol isn't implemented
+        cfg = config(interface(0, 0xFF, 3), endpoint(0x82, 2), endpoint(0x02, 2), endpoint(0x81, 3))
+        with self.assertRaisesRegex(TransportError, "0x1a86"):
+            termux_usb.find_serial(0x1A86, cfg)
+
 
 class TermuxRerun(unittest.TestCase):
     def test_reruns_under_termux_usb_and_exits_with_its_code(self):

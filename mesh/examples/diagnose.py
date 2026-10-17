@@ -63,7 +63,8 @@ def main():
             print("      FAIL: no reply. The bridge firmware is not running, or this is the wrong port.")
             print("      - Press the board's Reset button and run this again.")
             print("      - Re-flash firmware/espnow_bridge (Feather S3: board 'Adafruit Feather ESP32-S3',")
-            print("        Tools -> USB CDC On Boot: Enabled).")
+            print("        Tools -> USB CDC On Boot: Enabled; Heltec V3: board 'Heltec WiFi LoRa 32(V3)',")
+            print("        Tools -> USB CDC On Boot: Disabled).")
             return 1
         print(f"      OK: firmware is responding, board MAC {fmt_mac(link.mac)}")
         st = refresh_status(link)

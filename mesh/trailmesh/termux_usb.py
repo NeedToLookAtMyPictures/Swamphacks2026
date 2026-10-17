@@ -1,10 +1,15 @@
-"""Android transport: the ESP32-S3's native USB, driven through Termux:API.
+"""Android transport: the board's USB serial port, driven through Termux:API.
 
 Android apps can't open serial ports (there is no /dev/ttyACM0 without root).
 What Termux offers instead is `termux-usb`: after the user allows it, it starts
 a program and hands it an open file descriptor for the USB device. This module
-wraps that descriptor with libusb and speaks USB CDC-ACM itself, the same USB
-class the board presents to laptops, so the firmware doesn't change.
+wraps that descriptor with libusb and speaks the USB serial protocol itself, so
+the firmware doesn't change. Two kinds of board are supported:
+
+  * USB CDC-ACM, the standard class: ESP32-S3 boards on their native USB
+    (Adafruit Feather S3, generic ESP32-S3FN8 boards).
+  * Silicon Labs CP210x USB-UART chips, which use their own vendor protocol:
+    Heltec WiFi LoRa 32 V3 and most other boards with a CP2102 next to the USB port.
 
 Getting the descriptor is automatic: if this program wasn't started by
 termux-usb, open() reruns it through `termux-usb -r -E -e <this command>`
@@ -43,13 +48,21 @@ ERROR_TIMEOUT = -7
 ERROR_INTERRUPTED = -10
 
 # USB / CDC-ACM constants
-DESC_CONFIGURATION, DESC_INTERFACE, DESC_ENDPOINT = 2, 4, 5
-CLASS_CDC_COMM, CLASS_CDC_DATA = 0x02, 0x0A
+DESC_DEVICE, DESC_CONFIGURATION, DESC_INTERFACE, DESC_ENDPOINT = 1, 2, 4, 5
+CLASS_CDC_COMM, CLASS_CDC_DATA, CLASS_VENDOR = 0x02, 0x0A, 0xFF
 EP_DIR_IN, EP_TYPE_MASK, EP_TYPE_BULK = 0x80, 0x03, 0x02
 REQ_GET_DESCRIPTOR, REQ_SET_LINE_CODING, REQ_SET_CONTROL_LINE_STATE = 0x06, 0x20, 0x22
 DEVICE_TO_HOST_STANDARD, HOST_TO_DEVICE_CLASS_INTERFACE = 0x80, 0x21
 LINE_DTR = 0x0001  # DTR on, RTS off. Arduino-ESP32's TinyUSB serial only sends to the host
 #                    while DTR is on, and the toggle sequences that reboot the board all use RTS.
+
+# CP210x (Silicon Labs) vendor requests, from the CP210x interface spec (AN571)
+VID_SILABS = 0x10C4
+HOST_TO_DEVICE_VENDOR_INTERFACE = 0x41
+CP_IFC_ENABLE, CP_SET_LINE_CTL, CP_SET_MHS, CP_SET_BAUDRATE = 0x00, 0x03, 0x07, 0x1E
+CP_LINE_8N1 = 0x0800  # 8 data bits, no parity, 1 stop bit
+CP_MHS_RUN = 0x0300  # DTR and RTS both off (both mask bits set). Boards like the Heltec V3 wire
+#                      DTR/RTS to EN and IO0 for auto-flashing; with both off the board just runs.
 
 READ_TIMEOUT_MS = 50  # matches the 50 ms pyserial read timeout the link expects
 WRITE_TIMEOUT_MS = 2000
@@ -154,12 +167,11 @@ def _load_libusb():
     return lib
 
 
-def find_cdc(config: bytes) -> tuple[int | None, int, int, int]:
-    """(comm interface or None, data interface, bulk IN endpoint, bulk OUT endpoint)
-    from a raw configuration descriptor. Raises TransportError if there's no CDC data interface."""
-    comm = None
+def _scan(config: bytes) -> tuple[dict[int, int], dict[int, dict[str, int]]]:
+    """From a raw configuration descriptor: {interface: class} and
+    {interface: {"in": addr, "out": addr}} for its bulk endpoints."""
     iface_class: dict[int, int] = {}
-    eps: dict[int, dict[str, int]] = {}  # data interface -> {"in": addr, "out": addr}
+    eps: dict[int, dict[str, int]] = {}
     current = None
     i = 0
     while i + 2 <= len(config):
@@ -169,21 +181,53 @@ def find_cdc(config: bytes) -> tuple[int | None, int, int, int]:
         body = config[i : i + length]
         if kind == DESC_INTERFACE and length >= 9:
             current = body[2]
-            iface_class[current] = body[5]
-            if body[5] == CLASS_CDC_COMM and comm is None:
-                comm = current
+            iface_class.setdefault(current, body[5])
         elif kind == DESC_ENDPOINT and length >= 7 and current is not None:
-            if iface_class.get(current) == CLASS_CDC_DATA and body[3] & EP_TYPE_MASK == EP_TYPE_BULK:
+            if body[3] & EP_TYPE_MASK == EP_TYPE_BULK:
                 eps.setdefault(current, {})["in" if body[2] & EP_DIR_IN else "out"] = body[2]
         i += length
-    for data, found in eps.items():
-        if "in" in found and "out" in found:
-            return comm, data, found["in"], found["out"]
-    raise TransportError("the USB device has no CDC serial interface: is it an ESP32-S3 running the bridge firmware?")
+    return iface_class, eps
+
+
+def _bulk_pair(iface_class, eps, cls) -> tuple[int, int, int] | None:
+    """(interface, bulk IN, bulk OUT) of the first interface of class `cls` with both endpoints."""
+    for iface, found in eps.items():
+        if iface_class.get(iface) == cls and "in" in found and "out" in found:
+            return iface, found["in"], found["out"]
+    return None
+
+
+def find_cdc(config: bytes) -> tuple[int | None, int, int, int]:
+    """(comm interface or None, data interface, bulk IN endpoint, bulk OUT endpoint)
+    from a raw configuration descriptor. Raises TransportError if there's no CDC data interface."""
+    iface_class, eps = _scan(config)
+    pair = _bulk_pair(iface_class, eps, CLASS_CDC_DATA)
+    if pair is None:
+        raise TransportError("the USB device has no CDC serial interface")
+    comm = next((i for i, c in iface_class.items() if c == CLASS_CDC_COMM), None)
+    return (comm, *pair)
+
+
+def find_serial(vid: int, config: bytes) -> tuple[str, int | None, int, int, int]:
+    """(kind, control interface or None, data interface, bulk IN, bulk OUT), where kind is
+    "cdc" or "cp210x". Raises TransportError for any other USB device."""
+    try:
+        return ("cdc", *find_cdc(config))
+    except TransportError:
+        pass
+    if vid == VID_SILABS:
+        iface_class, eps = _scan(config)
+        pair = _bulk_pair(iface_class, eps, CLASS_VENDOR)
+        if pair is not None:
+            return ("cp210x", pair[0], *pair)  # one interface takes both the requests and the data
+    raise TransportError(
+        f"the USB device (vendor 0x{vid:04x}) is not a supported serial port: expected an ESP32-S3 on its "
+        "native USB (CDC) or a board with a Silicon Labs CP210x USB-UART chip (0x10c4)"
+    )
 
 
 class TermuxUsbTransport(Transport):
-    """USB CDC-ACM over a file descriptor from termux-usb."""
+    """USB serial (CDC-ACM or CP210x) over a file descriptor from termux-usb."""
 
     reconnectable = False
 
@@ -212,8 +256,8 @@ class TermuxUsbTransport(Transport):
             self._check(
                 lib.libusb_wrap_sys_device(self._ctx, self._fd, ctypes.byref(self._handle)), "libusb_wrap_sys_device"
             )
-            comm, data, self._ep_in, self._ep_out = find_cdc(self._config_descriptor())
-            for iface in (comm, data):
+            kind, comm, data, self._ep_in, self._ep_out = find_serial(self._vendor_id(), self._config_descriptor())
+            for iface in dict.fromkeys((comm, data)):  # CP210x: comm and data are the same interface
                 if iface is None:
                     continue
                 lib.libusb_detach_kernel_driver(self._handle, iface)  # fails harmlessly if none is attached
@@ -221,7 +265,9 @@ class TermuxUsbTransport(Transport):
                 self._claimed.append(iface)
             for ep in (self._ep_in, self._ep_out):
                 lib.libusb_clear_halt(self._handle, ep)  # reset data toggles left by a previous run
-            if comm is not None:
+            if kind == "cp210x":
+                self._cp210x_setup(comm, baud)
+            elif comm is not None:
                 if baud == 1200:
                     raise TransportError("1200 baud reboots Arduino-ESP32 boards into the bootloader")
                 coding = ctypes.create_string_buffer(struct.pack("<IBBB", baud, 0, 0, 8), 7)  # 8N1
@@ -245,22 +291,45 @@ class TermuxUsbTransport(Transport):
             raise TransportError(f"{what} failed: {self._lib.libusb_error_name(rc).decode()}")
         return rc
 
-    def _config_descriptor(self) -> bytes:
-        def get(n: int) -> bytes:
-            buf = ctypes.create_string_buffer(n)
-            got = self._check(
-                self._lib.libusb_control_transfer(
-                    self._handle, DEVICE_TO_HOST_STANDARD, REQ_GET_DESCRIPTOR, DESC_CONFIGURATION << 8, 0, buf, n,
-                    CTRL_TIMEOUT_MS,
-                ),
-                "read configuration descriptor",
-            )
-            return buf.raw[:got]
+    def _descriptor(self, kind: int, n: int) -> bytes:
+        buf = ctypes.create_string_buffer(n)
+        got = self._check(
+            self._lib.libusb_control_transfer(
+                self._handle, DEVICE_TO_HOST_STANDARD, REQ_GET_DESCRIPTOR, kind << 8, 0, buf, n, CTRL_TIMEOUT_MS
+            ),
+            "read USB descriptor",
+        )
+        return buf.raw[:got]
 
-        head = get(9)
+    def _vendor_id(self) -> int:
+        dev = self._descriptor(DESC_DEVICE, 18)
+        if len(dev) < 10:
+            raise TransportError("short device descriptor")
+        return int.from_bytes(dev[8:10], "little")  # idVendor
+
+    def _config_descriptor(self) -> bytes:
+        head = self._descriptor(DESC_CONFIGURATION, 9)
         if len(head) < 4:
             raise TransportError("short configuration descriptor")
-        return get(int.from_bytes(head[2:4], "little"))  # wTotalLength
+        return self._descriptor(DESC_CONFIGURATION, int.from_bytes(head[2:4], "little"))  # wTotalLength
+
+    def _cp210x_setup(self, iface: int, baud: int) -> None:
+        """Turn the CP210x's UART on at `baud`, 8N1. Unlike native USB, the baud rate here is real
+        and must match the firmware's BAUD."""
+
+        def request(req: int, value: int, data: bytes = b"") -> None:
+            buf = ctypes.create_string_buffer(data, len(data)) if data else None
+            self._check(
+                self._lib.libusb_control_transfer(
+                    self._handle, HOST_TO_DEVICE_VENDOR_INTERFACE, req, value, iface, buf, len(data), CTRL_TIMEOUT_MS
+                ),
+                f"CP210x request 0x{req:02x}",
+            )
+
+        request(CP_IFC_ENABLE, 1)
+        request(CP_SET_BAUDRATE, 0, struct.pack("<I", baud))
+        request(CP_SET_LINE_CTL, CP_LINE_8N1)
+        request(CP_SET_MHS, CP_MHS_RUN)
 
     # Transfers ----------------------------------------------------------------
 

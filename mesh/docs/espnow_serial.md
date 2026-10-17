@@ -63,9 +63,9 @@ shared between instances. The test suite uses them directly.
 
 ## Assumptions
 
-- **The board uses its native USB (ESP32-S3).** USB CDC ignores the baud rate,
-  so `baud` and the firmware's `BAUD` no longer matter; the link still sends
-  460800 for boards with a USB-UART chip.
+- **The baud rate only matters for boards with a USB-UART chip.** Native USB
+  CDC (Feather S3) ignores it. The Heltec V3's CP2102 doesn't: `baud` must
+  match the firmware's `BAUD`, and both default to 460800.
 - **There's one host process per board.** Nothing else (Arduino Serial
   Monitor, another script) can have the port open.
 - **The first GET_INFO can be lost** if the board is still booting (just

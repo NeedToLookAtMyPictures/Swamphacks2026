@@ -7,7 +7,8 @@ cares how the bytes travel. A Transport is just the pipe:
     (COM3, /dev/ttyACM0, /dev/cu.usbmodem...). Used on laptops, and by the
     tests through pyserial URLs such as socket://127.0.0.1:5000.
   * TermuxUsbTransport (termux_usb.py): Android, where apps can't open serial
-    ports. It drives the same USB CDC interface directly through Termux:API.
+    ports. It drives the board's USB serial interface (CDC, or a CP210x chip)
+    directly through Termux:API.
 
 open_transport() picks one from the port string. A new kind of pipe (LoRa
 modem, Bluetooth, ...) is a new Transport plus one register() call; the link
@@ -23,6 +24,7 @@ from typing import Callable
 ESP_USB_VIDS = {
     0x303A,  # Espressif: any ESP32-S3 on its built-in USB (generic ESP32-S3FN8 boards)
     0x239A,  # Adafruit: Feather ESP32-S3 running TinyUSB firmware
+    0x10C4,  # Silicon Labs CP210x USB-UART: Heltec WiFi LoRa 32 V3 and other boards with a CP2102
 }
 
 

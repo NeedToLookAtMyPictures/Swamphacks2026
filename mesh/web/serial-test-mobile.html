@@ -134,10 +134,12 @@
 <script>
 // Talks to firmware/espnow_bridge over WebUSB, for phones where Web Serial
 // can't reach USB devices. Implements just enough of USB CDC-ACM (the standard
-// USB serial class the Feather ESP32-S3's native USB uses) to send and receive bytes.
+// USB serial class the Feather ESP32-S3's native USB uses) and of the Silicon Labs
+// CP210x protocol (the USB-UART chip on the Heltec WiFi LoRa 32 V3) to send and receive bytes.
 
-const VENDOR_IDS = [0x239a, 0x303a];  // Adafruit, Espressif
-const BAUD = 460800;                  // matches espnow_bridge; native USB ignores it
+const VENDOR_IDS = [0x239a, 0x303a, 0x10c4];  // Adafruit, Espressif, Silicon Labs (CP210x)
+const VID_SILABS = 0x10c4;
+const BAUD = 460800;                  // matches espnow_bridge; native USB ignores it, CP210x needs it
 const LINE_STATE = 0x03;              // DTR + RTS on, same as a desktop serial port open
 
 // espnow_bridge binary messages (see trailmesh/espnow_serial.py)
@@ -185,7 +187,32 @@ function findCdc(device) {
       if (epIn && epOut) data = { dataIf: iface.interfaceNumber, epIn: epIn.endpointNumber, epOut: epOut.endpointNumber };
     }
   }
-  return data ? { ctrlIf, ...data } : null;
+  if (data) return { kind: 'cdc', ctrlIf, ...data };
+  if (device.vendorId !== VID_SILABS) return null;
+  // CP210x: one vendor-class interface carries both the setup requests and the data.
+  for (const iface of device.configuration.interfaces) {
+    const alt = iface.alternates[0];
+    const epIn = alt.endpoints.find(e => e.type === 'bulk' && e.direction === 'in');
+    const epOut = alt.endpoints.find(e => e.type === 'bulk' && e.direction === 'out');
+    if (alt.interfaceClass === 0xff && epIn && epOut) {
+      return { kind: 'cp210x', ctrlIf: null, dataIf: iface.interfaceNumber, epIn: epIn.endpointNumber, epOut: epOut.endpointNumber };
+    }
+  }
+  return null;
+}
+
+async function cp210xSetup(device, iface) {
+  // Vendor requests from the CP210x interface spec (AN571): enable the UART, set the
+  // baud rate and 8N1, then turn DTR and RTS off. The Heltec V3 wires DTR/RTS to the
+  // chip's EN and IO0 pins for auto-flashing; with both off the board just runs.
+  const out = (request, value, data) => device.controlTransferOut(
+    { requestType: 'vendor', recipient: 'interface', request, value, index: iface }, data);
+  const baud = new DataView(new ArrayBuffer(4));
+  baud.setUint32(0, BAUD, true);
+  await out(0x00, 0x0001);         // IFC_ENABLE
+  await out(0x1e, 0, baud);        // SET_BAUDRATE
+  await out(0x03, 0x0800);         // SET_LINE_CTL: 8 data bits, no parity, 1 stop bit
+  await out(0x07, 0x0300);         // SET_MHS: DTR off, RTS off
 }
 
 async function connect() {
@@ -205,7 +232,9 @@ async function connect() {
     if (cdc.ctrlIf !== null) await device.claimInterface(cdc.ctrlIf);
     await device.claimInterface(cdc.dataIf);
 
-    if (cdc.ctrlIf !== null) {
+    if (cdc.kind === 'cp210x') {
+      await cp210xSetup(device, cdc.dataIf);
+    } else if (cdc.ctrlIf !== null) {
       try {
         // SET_LINE_CODING (baud, 1 stop bit, no parity, 8 data bits), then SET_CONTROL_LINE_STATE
         const coding = new DataView(new ArrayBuffer(7));
