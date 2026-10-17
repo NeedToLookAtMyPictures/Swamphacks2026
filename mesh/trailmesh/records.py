@@ -16,18 +16,14 @@ class Kind(IntEnum):
     LOCALE_UPDATE = 1
     MESSAGE = 2
     PIN = 3
-    IMAGE = 4
-    MAP = 5
 
 
-# Lower is sent first. Small, safety-relevant data goes before bulk data so a
-# hiker who walks out of range mid-exchange has already received what matters.
+# Lower is sent first. Safety-relevant data goes first so a hiker who walks
+# out of range mid-exchange has already received what matters.
 PRIORITY = {
     Kind.LOCALE_UPDATE: 0,
     Kind.MESSAGE: 1,
     Kind.PIN: 2,
-    Kind.IMAGE: 3,
-    Kind.MAP: 4,
 }
 
 ID_LEN = 8

@@ -1,8 +1,8 @@
 # records.py: the data model
 
 **Purpose.** Defines `Record`, the single unit of data that gets stored, gossiped
-and synced. Everything the protocol moves (locale updates, messages, pins,
-images, maps) is a `Record`.
+and synced. Everything the protocol moves (locale updates, messages, pins)
+is a `Record`.
 
 ## Kinds and priority
 
@@ -11,8 +11,6 @@ class Kind(IntEnum):
     LOCALE_UPDATE = 1   # water level, campsite quality, hazards...
     MESSAGE = 2         # free text plus the sender's position
     PIN = 3             # a hiker's position and heading at a moment
-    IMAGE = 4
-    MAP = 5
 ```
 
 `PRIORITY` sets the order in which records are **sent** during an exchange
@@ -23,8 +21,6 @@ class Kind(IntEnum):
 | LOCALE_UPDATE | 0 | Safety-critical, small |
 | MESSAGE | 1 | Small |
 | PIN | 2 | Small, for search and rescue |
-| IMAGE | 3 | Bulk |
-| MAP | 4 | Largest |
 
 So a hiker who walks out of range mid-exchange already has the important
 records. Within the same kind, newer records go first (see [session.md](session.md)).
@@ -75,7 +71,6 @@ it asked for, and that check is the integrity check.
 | `Record.locale_update(origin, created, locale_id, field, text)` | `"{locale_id}:{field}"` | UTF-8 text |
 | `Record.message(origin, created, text, lat, lon)` | empty | position struct (heading 0) + UTF-8 text |
 | `Record.pin(origin, created, lat, lon, heading)` | empty | position struct |
-| `Record(Kind.IMAGE / MAP, origin, created, raw_bytes)` | your choice | raw bytes |
 
 Position struct: `lat*1e7 i32 | lon*1e7 i32 | heading u16` (10 bytes, about 1 cm resolution).
 
@@ -100,7 +95,6 @@ The replacement itself happens in the store; see [store.md](store.md).
 - `created` comes from a synced clock. If a device's clock is far ahead, its
   locale updates win every override comparison until real time catches up.
 - `origin` is trusted. Nothing proves who wrote a record.
-- Images and maps are opaque bytes. No format, thumbnail or compression handling.
 - There is no expiry or TTL field.
 
 ## Known gaps

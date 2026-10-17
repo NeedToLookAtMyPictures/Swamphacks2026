@@ -38,10 +38,10 @@ class ExchangeTests(unittest.TestCase):
     def test_large_record_is_chunked_over_lossy_link(self):
         m = SimMedium(self.clock, loss=0.3, seed=1)
         a, b = make(m, self.clock, 1, "a", **FAST), make(m, self.clock, 2, "b", **FAST)
-        img = Record(Kind.IMAGE, 1, self.t0, bytes(random.Random(0).randbytes(20_000)))
-        a.post(img)
-        run([a, b], self.clock, 60, until=lambda: b.store.has(img.id))
-        self.assertEqual(b.store.get(img.id).body, img.body)
+        big = Record(Kind.MESSAGE, 1, self.t0, bytes(random.Random(0).randbytes(20_000)))
+        a.post(big)
+        run([a, b], self.clock, 60, until=lambda: b.store.has(big.id))
+        self.assertEqual(b.store.get(big.id).body, big.body)
 
     def test_gossip_carries_data_across_hops(self):
         m = SimMedium(self.clock)
@@ -93,13 +93,13 @@ class ExchangeTests(unittest.TestCase):
         a = make(m, self.clock, 1, "a", **cfg)
         b = Node(2, m.link("b"), RecordStore(), Config(**cfg), clock=self.clock, on_session_end=ends.append)
         urgent = Record.locale_update(1, self.t0, "spring-1203", "water", "dry")
-        bulk = Record(Kind.MAP, 1, self.t0, bytes(200_000))
+        bulk = Record(Kind.MESSAGE, 1, self.t0, bytes(200_000))
         a.post(urgent)
         a.post(bulk)
         run([a, b], self.clock, 10, until=lambda: b.store.has(urgent.id))
         in_range[0] = False
         run([a, b], self.clock, 10, until=lambda: bool(ends))
-        self.assertTrue(b.store.has(urgent.id), "high-priority record should land before the bulk map")
+        self.assertTrue(b.store.has(urgent.id), "high-priority record should land before the bulk message")
         self.assertFalse(b.store.has(bulk.id))
         self.assertFalse(ends[0].ok)
         in_range[0] = True

@@ -120,6 +120,4 @@ digest = XOR over all ids in `records` (as 64-bit integers), as 8 bytes
 
 - **No expiry.** Records and tombstones grow forever. You'll want a TTL per
   kind ("water reports expire after 3 weeks") for long trips.
-- Images and maps are stored in SQLite as BLOBs. That's fine for kilobytes,
-  but awkward for many megabytes.
 - `received` is stored but never used.

@@ -81,16 +81,16 @@ class SerialLinkTests(unittest.TestCase):
             a = Node(1, links[0], RecordStore(), Config(always_on=True))
             b = Node(2, links[1], RecordStore(), Config(always_on=True))
             rec = Record.locale_update(1, int(time.time()), "spring-1203", "water", "dry")
-            img = Record(rec.kind, 1, int(time.time()), bytes(range(256)) * 20, b"photo")
+            big = Record(rec.kind, 1, int(time.time()), bytes(range(256)) * 20, b"big")
             a.post(rec)
-            a.post(img)
+            a.post(big)
             deadline = time.time() + 15
-            while time.time() < deadline and not (b.store.has(rec.id) and b.store.has(img.id)):
+            while time.time() < deadline and not (b.store.has(rec.id) and b.store.has(big.id)):
                 a.poll()
                 b.poll()
                 time.sleep(0.002)
             self.assertTrue(b.store.has(rec.id))
-            self.assertEqual(b.store.get(img.id).body, img.body)
+            self.assertEqual(b.store.get(big.id).body, big.body)
             self.assertEqual(links[0].mac, fake.boards[0]["mac"])
             self.assertEqual(links[0].status["channel"], 6)
         finally:

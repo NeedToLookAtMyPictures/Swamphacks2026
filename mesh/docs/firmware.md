@@ -132,5 +132,5 @@ Tested on two Feather S3s, with core 3.3.12, on 2026-10-17:
 3. Two boards running `examples/run_node.py --demo` complete a session.
 4. Toggling the radio every 20 s (`run_node.py` without `--demo`) doesn't
    cause errors or drop the USB connection.
-5. A 200 KB map transfers without RECV frames being dropped. If frames are
+5. A 200 KB record transfers without RECV frames being dropped. If frames are
    lost, increase the queue size or lower `window_frames` on the host.

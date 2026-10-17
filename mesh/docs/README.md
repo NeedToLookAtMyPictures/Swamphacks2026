@@ -78,8 +78,8 @@ interleave. The diagram shows one possible order.
 
 - **device id**: a nonzero 32-bit number per device, unique per user. The app
   chooses it. Both the "lower id initiates" rule and the firmware filter use it.
-- **record**: one immutable piece of data (locale update, message, pin, image,
-  map). Its id is a hash of its contents.
+- **record**: one immutable piece of data (locale update, message or
+  pin). Its id is a hash of its contents.
 - **frame**: one radio packet, at most `link.mtu` bytes (250 for ESP-NOW).
 - **window**: the short, scheduled time when every device's radio is on for discovery.
 - **session**: one exchange with one peer, from HELLO to DONE or failure.
