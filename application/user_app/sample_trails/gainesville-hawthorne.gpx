@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="sample" xmlns="http://www.topografix.com/GPX/1/1">
+  <metadata><name>Gainesville-Hawthorne Trail</name><desc>Paved rail trail from Depot Park east past Boulware Springs</desc></metadata>
+  <trk>
+    <name>Gainesville-Hawthorne Trail</name>
+    <trkseg>
+      <trkpt lat="29.64360" lon="-82.31950"/>
+      <trkpt lat="29.64050" lon="-82.31700"/>
+      <trkpt lat="29.63700" lon="-82.31500"/>
+      <trkpt lat="29.63300" lon="-82.31250"/>
+      <trkpt lat="29.62900" lon="-82.31000"/>
+      <trkpt lat="29.62500" lon="-82.30800"/>
+      <trkpt lat="29.62290" lon="-82.30620"/>
+      <trkpt lat="29.62050" lon="-82.30100"/>
+      <trkpt lat="29.61850" lon="-82.29500"/>
+      <trkpt lat="29.61700" lon="-82.28800"/>
+      <trkpt lat="29.61600" lon="-82.28000"/>
+      <trkpt lat="29.61500" lon="-82.27200"/>
+      <trkpt lat="29.61400" lon="-82.26400"/>
+      <trkpt lat="29.61300" lon="-82.25600"/>
+    </trkseg>
+  </trk>
+</gpx>

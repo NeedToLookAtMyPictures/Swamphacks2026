@@ -1,7 +1,8 @@
 // Debug tab: shows everything in the local database via the /api endpoints.
 
 const DEBUG_TABLES = ["messages", "locales", "geolocations", "tombstones"];
-const GLOBAL_DEBUG_TABLES = { global_locales: "/api/global/locales", global_info: "/api/global/info" };
+const GLOBAL_DEBUG_TABLES = { global_locales: "/api/global/locales",
+                              global_trails: "/api/global/trails", global_info: "/api/global/info" };
 const TIME_FIELDS = new Set(["time_created", "time_received", "last_server_sync",
                              "loaded_at"]);
 
@@ -89,7 +90,11 @@ async function loadDebug() {
     DEBUG_TABLES.forEach((t, i) => content.appendChild(renderTable(t, tables[i])));
     content.appendChild(el("h2", "Global database (from the server, read-only)", "debug-db-title"));
     Object.keys(GLOBAL_DEBUG_TABLES).forEach((t, i) => {
-      const rows = globalTables[i];
+      // Trails come with their parsed line; show its size instead of every point
+      const rows = t === "global_trails"
+        ? globalTables[i].map(({ segments, ...trail }) => ({
+            ...trail, points: segments.reduce((n, seg) => n + seg.length, 0) }))
+        : globalTables[i];
       content.appendChild(renderTable(t, Array.isArray(rows) ? rows : [rows]));
     });
     status.textContent = `Updated ${new Date().toLocaleTimeString()}`;

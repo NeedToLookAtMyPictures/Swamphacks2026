@@ -23,13 +23,15 @@ Syncing with another device or the server
 Global data (set by the company, loaded once from the server; users can't change it)
     GET    /api/global/locales?category=    water sources, campsites, ...
     GET    /api/global/categories           each category with its count
+    GET    /api/global/trails               trails with their lines parsed from GPX
+    GET    /api/global/trails/<id>.gpx      a trail's original GPX file
     GET    /api/global/info                 {loaded_at}
-    POST   /api/global/load                 from the server: {locales: [...]}; replaces everything
+    POST   /api/global/load                 from the server: {locales, trails}; replaces everything
 """
 
 import sqlite3
 
-from flask import Blueprint, current_app, jsonify, request
+from flask import Blueprint, Response, current_app, jsonify, request
 
 from database import SHARED_TABLES, DeviceNotInitialized
 
@@ -186,6 +188,20 @@ def global_locales():
 @api.get("/global/categories")
 def global_categories():
     return jsonify(global_db().categories())
+
+
+@api.get("/global/trails")
+def global_trails():
+    return jsonify(global_db().trails())
+
+
+@api.get("/global/trails/<trail_id>.gpx")
+def global_trail_gpx(trail_id):
+    gpx = global_db().trail_gpx(trail_id)
+    if gpx is None:
+        return jsonify(error="no such trail"), 404
+    return Response(gpx, mimetype="application/gpx+xml",
+                    headers={"Content-Disposition": f'attachment; filename="{trail_id}.gpx"'})
 
 
 @api.get("/global/info")

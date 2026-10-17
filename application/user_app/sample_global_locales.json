@@ -1,5 +1,5 @@
 {
-  "_comment": "Example global data in the format the server sends. Places are real Gainesville parks, but the amenities and descriptions are made up for testing. Load with: python global_database.py load sample_global_locales.json",
+  "_comment": "Example global data in the format the server sends. Places are real Gainesville parks, but the amenities, descriptions and trail routes are made up / approximate for testing. Trails here use gpx_file (relative to this file); the server sends the GPX text as gpx. Load with: python global_database.py load sample_global_locales.json",
   "locales": [
     {
       "id": "water-lake-alice",
@@ -192,6 +192,26 @@
       "latitude": 29.6605,
       "longitude": -82.285,
       "description": "First aid kit"
+    }
+  ],
+  "trails": [
+    {
+      "id": "trail-gainesville-hawthorne",
+      "name": "Gainesville-Hawthorne Trail",
+      "description": "Paved rail trail from Depot Park east past Boulware Springs",
+      "gpx_file": "sample_trails/gainesville-hawthorne.gpx"
+    },
+    {
+      "id": "trail-hogtown",
+      "name": "Hogtown Creek Greenway",
+      "description": "Boardwalk and dirt trail along the creek",
+      "gpx_file": "sample_trails/hogtown-greenway.gpx"
+    },
+    {
+      "id": "trail-sweetwater",
+      "name": "Sweetwater Wetlands loop",
+      "description": "Loop around the wetlands; watch for alligators",
+      "gpx_file": "sample_trails/sweetwater-loop.gpx"
     }
   ]
 }

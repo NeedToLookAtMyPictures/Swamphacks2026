@@ -347,7 +347,7 @@ main {
 
 .settings-back:hover { background: #e8efe9; }
 
-#last-known-search, #locales-search {
+#last-known-search, #locales-search, #trails-search {
   width: 100%;
   padding: 6px 8px;
   font: inherit;
@@ -355,7 +355,7 @@ main {
   border-radius: 4px;
 }
 
-#last-known-list, #locales-list {
+#last-known-list, #locales-list, #trails-list {
   max-height: 240px;
   overflow-y: auto;
   margin-top: 6px;

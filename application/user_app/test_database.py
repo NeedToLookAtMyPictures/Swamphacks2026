@@ -223,10 +223,15 @@ class ApiTest(unittest.TestCase):
         c = self.client
         spring = {"id": "w1", "category": "Water", "name": "Spring", "latitude": 1, "longitude": 2}
         self.assertEqual(c.post("/api/global/load", json={}).status_code, 400)
-        self.assertEqual(c.post("/api/global/load", json={"locales": [spring]}).json, {"locales": 1})
+        self.assertEqual(c.post("/api/global/load", json={"locales": [spring]}).json, {"locales": 1, "trails": 0})
         self.assertEqual(c.get("/api/global/locales").json[0]["category"], "water")
         self.assertEqual(c.get("/api/global/categories").json, [{"category": "water", "count": 1}])
         self.assertIsNotNone(c.get("/api/global/info").json["loaded_at"])
+        gpx = GlobalDatabaseTest.GPX
+        c.post("/api/global/load", json={"locales": [], "trails": [{"id": "t1", "name": "Loop", "gpx": gpx}]})
+        self.assertEqual(c.get("/api/global/trails").json[0]["name"], "Loop")
+        self.assertEqual(c.get("/api/global/trails/t1.gpx").get_data(as_text=True), gpx)
+        self.assertEqual(c.get("/api/global/trails/nope.gpx").status_code, 404)
 
 
 class GlobalDatabaseTest(unittest.TestCase):
@@ -247,6 +252,26 @@ class GlobalDatabaseTest(unittest.TestCase):
         self.db.load({"locales": [self.locale("c")]})
         self.assertEqual([l["id"] for l in self.db.locales()], ["c"])
         self.assertIsNotNone(self.db.info()["loaded_at"])
+
+    GPX = ('<gpx xmlns="http://www.topografix.com/GPX/1/1"><trk><trkseg>'
+           '<trkpt lat="29.0" lon="-82.0"/><trkpt lat="29.01" lon="-82.0"/>'
+           '</trkseg></trk></gpx>')
+
+    def test_trails(self):
+        self.db.load({"locales": [], "trails": [{"id": "t1", "name": "Loop", "gpx": self.GPX}]})
+        [trail] = self.db.trails()
+        self.assertEqual(trail["segments"], [[[29.0, -82.0], [29.01, -82.0]]])
+        self.assertAlmostEqual(trail["length_km"], 1.11, places=2)
+        self.assertEqual(self.db.trail_gpx("t1"), self.GPX)
+        # routes (rte/rtept) work too, without a namespace
+        self.db.load({"locales": [], "trails": [{"id": "t2", "name": "Route", "gpx":
+            '<gpx><rte><rtept lat="1" lon="2"/><rtept lat="3" lon="4"/></rte></gpx>'}]})
+        self.assertEqual([t["id"] for t in self.db.trails()], ["t2"])
+
+    def test_bad_gpx_is_refused(self):
+        for gpx in ("not xml", "<gpx><trk><trkseg><trkpt lat='1' lon='2'/></trkseg></trk></gpx>"):
+            with self.assertRaises(ValueError):
+                self.db.load({"locales": [], "trails": [{"id": "t", "name": "x", "gpx": gpx}]})
 
     def test_bad_record_changes_nothing(self):
         self.db.load({"locales": [self.locale("a")]})

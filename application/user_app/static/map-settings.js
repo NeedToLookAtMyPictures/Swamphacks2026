@@ -22,6 +22,11 @@ function showSettingsView(name) {
     search.value = "";
     loadLastKnown().then(() => search.focus());
   }
+  if (name === "trails") {
+    const search = document.getElementById("trails-search");
+    search.value = "";
+    loadTrails().then(() => search.focus());
+  }
   if (name === "locales") {
     const search = document.getElementById("locales-search");
     search.value = "";
@@ -129,6 +134,7 @@ function initMapSettings() {
   document.getElementById("last-known-search").addEventListener("input", renderLastKnownList);
   initGlobalLocales();
   initLocaleSheet();
+  initTrails();
 
   // Keep the map from panning/zooming when interacting with the menu
   const container = document.getElementById("map-settings");
@@ -140,4 +146,5 @@ function initMapSettings() {
 function refreshMapSettings() {
   if (lastKnownShown.size) loadLastKnown();
   loadGlobalLocales();
+  loadTrails();
 }

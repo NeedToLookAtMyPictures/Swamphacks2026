@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="sample" xmlns="http://www.topografix.com/GPX/1/1">
+  <metadata><name>Hogtown Creek Greenway</name><desc>Boardwalk and dirt trail along the creek</desc></metadata>
+  <trk>
+    <name>Hogtown Creek Greenway</name>
+    <trkseg>
+      <trkpt lat="29.67000" lon="-82.38000"/>
+      <trkpt lat="29.66880" lon="-82.38180"/>
+      <trkpt lat="29.66720" lon="-82.38320"/>
+      <trkpt lat="29.66550" lon="-82.38500"/>
+      <trkpt lat="29.66400" lon="-82.38680"/>
+      <trkpt lat="29.66220" lon="-82.38800"/>
+      <trkpt lat="29.66050" lon="-82.38930"/>
+      <trkpt lat="29.65880" lon="-82.39020"/>
+      <trkpt lat="29.65700" lon="-82.39100"/>
+      <trkpt lat="29.65550" lon="-82.39030"/>
+    </trkseg>
+  </trk>
+</gpx>
