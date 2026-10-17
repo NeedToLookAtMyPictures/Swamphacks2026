@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # Run the sync server and give it a public internet URL anyone can reach.
 #
-#   ./serve_public.sh                         # cloudflared: no account, new random URL each run
+#   ./serve_public.sh                         # https://heuslerene.com/server (named tunnel "swamphacks")
+#   CLOUDFLARE_TUNNEL= ./serve_public.sh      # cloudflared: no account, new random URL each run
 #   NGROK_DOMAIN=<name>.ngrok-free.app ./serve_public.sh   # ngrok: the same URL every run
+#
+# The named tunnel needs a one-time setup; see README.md.
 #
 # The database stays on this machine (data/server.db). Devices on the same wifi
 # can still reach it directly too. There is no login: anyone with the URL can
@@ -11,6 +14,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 PORT="${PORT:-8000}"
+CLOUDFLARE_TUNNEL="${CLOUDFLARE_TUNNEL-swamphacks}"   # set it empty for a quick random URL
 export BIND="0.0.0.0:${PORT}"
 
 if [[ -n "${NGROK_DOMAIN:-}" ]]; then
@@ -36,6 +40,11 @@ if [[ -n "${NGROK_DOMAIN:-}" ]]; then
   echo "Public URL: https://${NGROK_DOMAIN}   (database page: https://${NGROK_DOMAIN}/)"
   echo
   ngrok http --url="https://${NGROK_DOMAIN}" "${PORT}" --log stdout --log-level warn
+elif [[ -n "${CLOUDFLARE_TUNNEL}" ]]; then
+  echo
+  echo "Public URL: https://heuslerene.com/server   (database page: https://heuslerene.com/server/)"
+  echo
+  cloudflared tunnel --no-autoupdate run --url "http://localhost:${PORT}" "${CLOUDFLARE_TUNNEL}"
 else
   echo
   echo "Public URL: look for https://<random-words>.trycloudflare.com below."

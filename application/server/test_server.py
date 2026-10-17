@@ -113,6 +113,15 @@ class ServerSyncTest(unittest.TestCase):
         for table in ("users", "locales", "messages", "geolocations", "tombstones"):
             self.assertIn(f'"{table}"', page.text)
 
+    def test_works_under_the_public_url_prefix(self):
+        # https://heuslerene.com/server/... arrives as /server/... ; the wifi address has no prefix
+        health = self.client.get("/server/api/health").json
+        self.assertEqual(health, {**health, "ok": True})
+        self.assertEqual(self.client.get("/api/health").status_code, 200)
+        self.assertIn('"/server/api"', self.client.get("/server/").text)
+        self.assertIn('"/api"', self.client.get("/").text)
+        self.assertEqual(self.client.get("/serverless/api/health").status_code, 404)
+
     def test_bad_sync_requests(self):
         c = self.client
         self.assertEqual(c.get("/api/health").status_code, 200)

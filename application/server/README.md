@@ -59,11 +59,46 @@ With `--server`, that server is tried first and one on the wifi is the fallback
 address, so devices sync from any network (including wifi that blocks devices
 from reaching each other). The database stays on this machine. Ctrl+C stops both.
 
+**https://heuslerene.com/server (Cloudflare named tunnel, the default):**
+`./serve_public.sh` runs the tunnel `swamphacks`. The server answers both
+`/server/...` and `/...`, so the same server works at the public URL and at its
+wifi address (`URL_PREFIX` changes the prefix). One-time setup on this machine:
+
+```bash
+sudo pacman -S cloudflared
+cloudflared tunnel login              # opens a browser: pick heuslerene.com
+cloudflared tunnel create swamphacks
+```
+
+Then point the domain at the tunnel, depending on what heuslerene.com serves now:
+
+- **Nothing else:** `cloudflared tunnel route dns --overwrite-dns swamphacks heuslerene.com`.
+  The whole domain goes to this server; `/server` is the sync URL.
+- **Another website:** routing the whole domain would replace that site, so give
+  the tunnel a subdomain and forward only `/server` to it with a Cloudflare Worker:
+  1. `cloudflared tunnel route dns swamphacks swamphacks.heuslerene.com`
+  2. In the Cloudflare dashboard, create a Worker with the code below and add the
+     route `heuslerene.com/server*` to it (Worker → Settings → Domains & Routes):
+
+     ```js
+     export default {
+       fetch(request) {
+         const url = new URL(request.url);
+         url.hostname = "swamphacks.heuslerene.com";  // keeps the /server/... path
+         return fetch(new Request(url, request));
+       },
+     };
+     ```
+
+Check from a phone on mobile data: https://heuslerene.com/server/api/health
+should show `{"ok":true,...}`. The user app tries this URL first by default
+(`PUBLIC_SERVER_URL` in `user_app/main.py`).
+
 **Quick, no account (cloudflared):** the URL is random and changes every run.
 
 ```bash
 sudo pacman -S cloudflared      # Arch; other systems: see Cloudflare's cloudflared docs
-./serve_public.sh               # prints https://<random-words>.trycloudflare.com
+CLOUDFLARE_TUNNEL= ./serve_public.sh   # prints https://<random-words>.trycloudflare.com
 ```
 
 **Same URL every run (ngrok):** sign up for a free account at ngrok.com, install
@@ -74,8 +109,8 @@ and claim your free static domain in the ngrok dashboard (Domains). Then:
 NGROK_DOMAIN=<name>.ngrok-free.app ./serve_public.sh
 ```
 
-Put that URL in `PUBLIC_SERVER_URL` in `user_app/main.py` so every user app
-tries it first by default, or start apps with `--server https://<url>`.
+With either of these, start apps with `--server https://<url>`, or put the URL
+in `PUBLIC_SERVER_URL` in `user_app/main.py`.
 
 There is no login: anyone with the URL can read every message on the database
 page and add records through the API.

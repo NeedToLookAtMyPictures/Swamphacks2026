@@ -36,6 +36,7 @@
 
   <script>
     const TABLES = {{ tables | tojson }};
+    const API = {{ (request.script_root ~ '/api') | tojson }};  // includes /server when opened through it
     const TIME_FIELDS = new Set(["time_created", "time_received", "last_sync"]);
     const LONG_FIELDS = new Set(["content", "comment"]);
 
@@ -87,7 +88,7 @@
       const status = document.getElementById("status");
       try {
         const data = await Promise.all(TABLES.map(
-          (t) => fetch(`api/${t}`).then((r) => r.json())));
+          (t) => fetch(`${API}/${t}`).then((r) => r.json())));
         document.getElementById("tables").replaceChildren(
           ...TABLES.map((t, i) => render(t, data[i])));
         status.textContent = `Updated ${new Date().toLocaleTimeString()}`;

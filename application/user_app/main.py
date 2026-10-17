@@ -29,7 +29,7 @@ from download_locales import DATA_DIR, DEFAULT_BBOX, MAP_FILE, MAP_INFO_FILE
 # PUBLIC_SERVER_URL is its address on the internet (server/serve_public.sh prints
 # it), so it works from any network; LAN_SERVER_URL is its wifi address, which
 # can change when it reconnects: check with `ip -4 addr show` and update it here.
-PUBLIC_SERVER_URL = ""
+PUBLIC_SERVER_URL = "https://heuslerene.com/server"
 LAN_SERVER_URL = "http://10.138.191.107:8000"
 DEFAULT_SERVER_URLS = ",".join(u for u in (PUBLIC_SERVER_URL, LAN_SERVER_URL) if u)
 

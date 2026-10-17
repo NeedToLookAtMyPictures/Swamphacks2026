@@ -36,6 +36,9 @@ import discovery  # noqa: E402
 from database import SHARED_TABLES, Database, check_name  # noqa: E402
 
 DB_PATH = Path(os.environ.get("SERVER_DB", HERE / "data" / "server.db"))
+# The public URL is https://heuslerene.com/server, and the tunnel passes the path
+# on unchanged. Requests work with or without it, so the wifi address still works.
+URL_PREFIX = os.environ.get("URL_PREFIX", "/server").rstrip("/")
 
 USERS_SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -107,7 +110,22 @@ class NameTaken(Exception):
     pass
 
 
-def create_app(path=DB_PATH):
+class StripPrefix:
+    """WSGI middleware: serve /<prefix>/api/... the same as /api/... (and tell
+    Flask about the prefix, so the database page's links include it)."""
+
+    def __init__(self, app, prefix):
+        self.app, self.prefix = app, prefix
+
+    def __call__(self, environ, start_response):
+        path = environ.get("PATH_INFO", "")
+        if self.prefix and (path == self.prefix or path.startswith(self.prefix + "/")):
+            environ["SCRIPT_NAME"] = environ.get("SCRIPT_NAME", "") + self.prefix
+            environ["PATH_INFO"] = path[len(self.prefix):] or "/"
+        return self.app(environ, start_response)
+
+
+def create_app(path=DB_PATH, prefix=URL_PREFIX):
     app = Flask(__name__, template_folder=str(HERE / "templates"))
     server = Server(path)
     app.config["SERVER"] = server
@@ -173,6 +191,7 @@ def create_app(path=DB_PATH):
         since = request.args.get("since")
         return jsonify(server.db.list(table, float(since) if since is not None else None))
 
+    app.wsgi_app = StripPrefix(app.wsgi_app, prefix)
     return app
 
 
