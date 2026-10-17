@@ -321,12 +321,12 @@ class Database:
     def export(self, since=None):
         """Everything this device would share with another device or the server.
 
-        Dead messages (expired or tombstoned) are never shared; the tombstone is
-        what tells other devices to kill their copy.
+        Expired messages are kept for their sender/receiver but never shared.
         """
         self.purge()
         data = {table: self.list(table, since) for table in SHARED_TABLES}
-        data["messages"] = [m for m in data["messages"] if not m["is_dead"]]
+        cutoff = time.time() - MESSAGE_TTL
+        data["messages"] = [m for m in data["messages"] if m["time_created"] > cutoff]
         for rows in data.values():
             for row in rows:
                 row.pop("time_received", None)  # local bookkeeping only

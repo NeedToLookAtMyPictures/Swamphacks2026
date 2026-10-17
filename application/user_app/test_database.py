@@ -72,12 +72,11 @@ class DatabaseTest(unittest.TestCase):
     def test_sender_sees_received_only_from_tombstone_within_31_days(self):
         msg = self.alice.add_message("bob", "hi")
         self.bob.merge(self.alice.export())
-        self.assertNotIn("received", self.alice.export()["messages"][0])  # local only
         self.alice.merge(self.bob.export())     # tombstone reaches alice in time
         message = self.alice.get("messages", "d-alice", msg["seq"])
         self.assertTrue(message["is_dead"])
         self.assertTrue(message["received"])
-        self.assertEqual(self.alice.export()["messages"], [])  # dead, so not shared
+        self.assertNotIn("received", self.alice.export()["messages"][0])  # local only
 
         # the tombstone reaches alice after the message is 31 days old: received or died
         late = self.alice.add_message("bob", "late")
@@ -118,15 +117,6 @@ class DatabaseTest(unittest.TestCase):
         self.carol.merge(self.bob.export())
         self.assertIsNone(self.carol.get("messages", "d-alice", 1))
         self.assertEqual(len(self.carol.list("tombstones")), 1)
-
-    def test_dead_message_is_not_shared(self):
-        msg = self.alice.add_message("bob", "hi")
-        self.carol.merge(self.alice.export())   # carol relays it
-        self.alice.add_tombstone("d-alice", msg["seq"], "recalled")
-        self.assertEqual(self.alice.export()["messages"], [])
-        self.carol.merge(self.alice.export())   # only the tombstone travels
-        self.assertTrue(self.carol.get("messages", "d-alice", msg["seq"])["is_dead"])
-        self.assertEqual(self.carol.export()["messages"], [])
 
     def test_old_messages_deleted_except_for_sender_and_receiver(self):
         old = time.time() - MESSAGE_TTL - 10
@@ -258,7 +248,7 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(c.get("/api/messages/d-bob/1").json["is_dead"], 1)
 
         shared = c.get("/api/sync").json
-        self.assertEqual([m["origin_id"] for m in shared["messages"]], [msg["origin_id"]])  # dead one isn't shared
+        self.assertEqual(len(shared["messages"]), 2)
         self.assertEqual(len(shared["tombstones"]), 1)
         self.assertEqual(len(shared["geolocations"]), 1)
         self.assertEqual([p["name"] for p in c.get("/api/contacts").json], ["bob"])
