@@ -3,6 +3,7 @@
 Device (this user, never shared)
     GET    /api/device                      this device's info
     POST   /api/device                      create identity {name, device_id?}; name must be unique
+                                            (reserved on the server first when it can be reached)
     PATCH  /api/device                      update mutable fields {last_server_sync}
 
 Records created on this device
@@ -25,6 +26,7 @@ import sqlite3
 
 from flask import Blueprint, current_app, jsonify, request
 
+import server_sync
 from database import SHARED_TABLES, DeviceNotInitialized
 
 api = Blueprint("api", __name__, url_prefix="/api")
@@ -81,7 +83,18 @@ def init_device():
     if db().get_device() is not None:
         return jsonify(error="device already initialized; its identity is immutable"), 409
     data = body("name")
-    device = db().init_device(data["name"], data.get("device_id"))
+    name, device_id = data["name"], data.get("device_id")
+    server_url = current_app.config.get("SERVER_URL")
+    if server_url:
+        # Only the server can guarantee the name is unique. Offline, go ahead anyway.
+        try:
+            reserved = server_sync.register(server_url, name, device_id)
+            name, device_id = reserved["name"], reserved["device_id"]
+        except server_sync.ServerError as exc:
+            return jsonify(error=f"server refused the name: {exc}"), 409
+        except OSError:
+            pass
+    device = db().init_device(name, device_id)
     return jsonify(device), 201
 
 

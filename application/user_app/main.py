@@ -3,13 +3,16 @@
 Usage:
     python download_locales.py map    # once, while online
     python main.py                    # start the web interface (works offline)
+    python main.py --server https://example.com   # also sync whenever the server is reachable
 """
 
 import argparse
 import json
+import os
 
 from flask import Flask, render_template, send_file
 
+import server_sync
 from api import api
 from database import Database
 from download_locales import DEFAULT_BBOX, MAP_FILE, MAP_INFO_FILE
@@ -21,6 +24,7 @@ from download_locales import DEFAULT_BBOX, MAP_FILE, MAP_INFO_FILE
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
 app.config["DATABASE"] = Database()
+app.config["SERVER_URL"] = None
 app.register_blueprint(api)
 
 
@@ -52,6 +56,10 @@ def run(args):
     if not MAP_FILE.exists():
         print("No offline map found. Run `python download_locales.py map` first.")
     app.config["DATABASE"].purge()
+    app.config["SERVER_URL"] = args.server
+    # With --debug the reloader runs this twice; only sync from the process that serves
+    if args.server and (not args.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true"):
+        server_sync.start(app.config["DATABASE"], args.server)
     app.run(host=args.host, port=args.port, debug=args.debug)
 
 
@@ -60,6 +68,9 @@ def main():
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=5000)
     parser.add_argument("--debug", action="store_true")
+    parser.add_argument("--server", default=os.environ.get("SERVER_URL"),
+                        help="server to sync with whenever it can be reached "
+                             "(default: $SERVER_URL; leave out to stay offline)")
     run(parser.parse_args())
 
 

@@ -36,7 +36,12 @@ python download_locales.py map --source some-local-file.pmtiles
 ```bash
 python main.py                       # http://127.0.0.1:5000
 python main.py --host 0.0.0.0        # reachable from other devices on the LAN
+python main.py --server http://<server>:8000   # also sync with the server whenever it's reachable
 ```
+
+With `--server` (or `SERVER_URL` set), a background thread tries the server every
+30 seconds and syncs whenever it answers. The app keeps working offline. See
+`../server/README.md`.
 
 ## Database
 
@@ -50,7 +55,7 @@ Configuration issue:
 | `messages` | yes | (origin_id, seq) | dead after 31 days or once delivered |
 | `geolocations` | yes | user | newest position wins; ties go to the higher device ID |
 | `tombstones` | yes | (origin_id, seq) | kills the target message; deleted after 31 days |
-| `device_info` | **no** | single row | `device_id` and `name` are immutable; `next_seq`, `last_server_sync` |
+| `device_info` | **no** | single row | `device_id` and `name` are immutable; `next_seq`, `last_server_sync`, `last_push`, `server_cursor` |
 
 Every record this device creates gets `origin_id = device_id` and the next
 `seq`.
@@ -68,7 +73,7 @@ until the one with that name sees it. A message with receiver `*` goes to
 days. (`*` isn't a valid name, so no person can be called that.) Offline, the app can only refuse names
 it has already seen, so real uniqueness has to come from the server at setup.
 
-If you have a `data/user.db` from before names replaced `user_id`, delete it. Expired messages are deleted, except on the sender's and receiver's
+If you have a `data/user.db` from an older schema, delete it (the app refuses to start with one). Expired messages are deleted, except on the sender's and receiver's
 devices, where they're kept (marked dead) but no longer shared.
 
 ### API
@@ -78,7 +83,7 @@ All endpoints take and return JSON. Full list in `api.py`.
 | Method | Path | What it does |
 |---|---|---|
 | GET | `/api/device` | this device's info |
-| POST | `/api/device` | create identity once: `{name, device_id?}` (`device_id` is generated if left out) |
+| POST | `/api/device` | create identity once: `{name, device_id?}` (`device_id` is generated if left out; the name is reserved on the server first if it can be reached) |
 | PATCH | `/api/device` | update mutable fields: `{last_server_sync}` |
 | POST | `/api/locales` | `{location, name, comment?}` |
 | POST | `/api/messages` | `{receiver, content}`: `receiver` is a name, or `*` for everyone |

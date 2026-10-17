@@ -22,7 +22,10 @@ DEFAULT_DB_PATH = Path(__file__).resolve().parent / "data" / "user.db"
 
 MESSAGE_TTL = 2_678_400    # 31 days, in seconds
 TOMBSTONE_TTL = 2_678_400  # 31 days, in seconds
-SCHEMA_VERSION = 2
+# Each sync re-sends records from this long before the cursor, so a record written
+# while a sync was running isn't skipped. Merging is idempotent, so repeats are harmless.
+SYNC_OVERLAP = 60  # seconds
+SCHEMA_VERSION = 3
 
 # Names are people's addresses: short (they go over LoRa) and compared ignoring case
 NAME_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
@@ -83,7 +86,9 @@ CREATE TABLE IF NOT EXISTS device_info (
     name             TEXT    NOT NULL COLLATE NOCASE,  -- immutable, unique: the user's address
     next_seq         INTEGER NOT NULL DEFAULT 1,
     time_created     REAL    NOT NULL,
-    last_server_sync REAL               -- NULL until the first server sync
+    last_server_sync REAL,              -- NULL until the first server sync
+    last_push        REAL,              -- this device's clock: sent the server everything received before this
+    server_cursor    REAL               -- the server's clock: got everything it received before this
 );
 
 CREATE TRIGGER IF NOT EXISTS device_info_immutable
@@ -129,8 +134,11 @@ def check_name(name):
 
 
 class Database:
-    def __init__(self, path=DEFAULT_DB_PATH):
+    def __init__(self, path=DEFAULT_DB_PATH, relay=False):
+        """relay=True is for the server: it has no identity of its own and only
+        stores and passes on records, so it never marks a message delivered."""
         self.path = Path(path)
+        self.relay = relay
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as conn:
             version = conn.execute("PRAGMA user_version").fetchone()[0]
@@ -178,13 +186,15 @@ class Database:
             )
         return self.get_device()
 
-    def update_device(self, last_server_sync=None):
-        """Update the mutable device fields."""
+    def update_device(self, last_server_sync=None, last_push=None, server_cursor=None):
+        """Update the mutable device fields. Fields left as None are unchanged."""
         self._require_device()
+        fields = dict(last_server_sync=last_server_sync, last_push=last_push,
+                      server_cursor=server_cursor)
         with self._connect() as conn:
-            if last_server_sync is not None:
-                conn.execute("UPDATE device_info SET last_server_sync = ? WHERE id = 1",
-                             (last_server_sync,))
+            for column, value in fields.items():
+                if value is not None:
+                    conn.execute(f"UPDATE device_info SET {column} = ? WHERE id = 1", (value,))
         return self.get_device()
 
     def _require_device(self):
@@ -270,12 +280,20 @@ class Database:
                                (origin_id, seq)).fetchone()
         return dict(row) if row else None
 
-    def list(self, table, since=None):
-        """All rows in a shared table, optionally only those created after `since`."""
+    def list(self, table, since=None, received_since=None):
+        """All rows in a shared table, optionally only those created after `since`
+        and/or those that arrived on this device after `received_since`."""
         assert table in SHARED_TABLES
-        query, params = f"SELECT * FROM {table}", ()
+        where, params = [], []
         if since is not None:
-            query, params = query + " WHERE time_created > ?", (since,)
+            where.append("time_created > ?")
+            params.append(since)
+        if received_since is not None:
+            where.append("time_received > ?")
+            params.append(received_since)
+        query = f"SELECT * FROM {table}"
+        if where:
+            query += " WHERE " + " AND ".join(where)
         with self._connect() as conn:
             return [dict(r) for r in conn.execute(query + " ORDER BY time_created", params)]
 
@@ -309,19 +327,30 @@ class Database:
             })
         return result
 
-    def export(self, since=None):
+    def export(self, since=None, received_since=None):
         """Everything this device would share with another device or the server.
 
         Expired messages are kept for their sender/receiver but never shared.
         """
         self.purge()
-        data = {table: self.list(table, since) for table in SHARED_TABLES}
+        data = {table: self.list(table, since, received_since) for table in SHARED_TABLES}
         cutoff = time.time() - MESSAGE_TTL
         data["messages"] = [m for m in data["messages"] if m["time_created"] > cutoff]
         for rows in data.values():
             for row in rows:
                 row.pop("time_received", None)  # local bookkeeping only
         return data
+
+    def changes(self, cursor=None):
+        """Records that arrived here since a previous call, for syncing with the server.
+
+        `cursor` is what the previous call returned (None for everything). Returns
+        (records, new_cursor). Cursors use this database's own clock, so they are
+        never compared with another machine's.
+        """
+        new_cursor = time.time()
+        since = None if cursor is None else cursor - SYNC_OVERLAP
+        return self.export(received_since=since), new_cursor
 
     # -- merging records from other devices ----------------------------------------
 
@@ -331,7 +360,7 @@ class Database:
         Returns how many records of each table were new or changed.
         """
         now = time.time()
-        me = self._require_device()["name"]
+        me = None if self.relay else self._require_device()["name"]
         counts = dict.fromkeys(SHARED_TABLES, 0)
         with self._connect() as conn:
             # Tombstones first, so they also kill messages arriving in this batch
@@ -363,7 +392,7 @@ class Database:
         Creates the 'delivered' tombstone, which then spreads like any other record.
         Broadcasts have no single receiver, so they are never delivered.
         """
-        if record["receiver"].lower() != me.lower():
+        if me is None or record["receiver"].lower() != me.lower():
             return
         row = conn.execute("SELECT is_dead FROM messages WHERE origin_id = ? AND seq = ?",
                            (record["origin_id"], record["seq"])).fetchone()
@@ -371,7 +400,8 @@ class Database:
             self._create_tombstone(conn, record["origin_id"], record["seq"], "delivered")
 
     def _merge_message(self, conn, record, me):
-        mine = me.lower() in (record["sender"].lower(), record["receiver"].lower())
+        mine = me is not None and me.lower() in (record["sender"].lower(),
+                                                 record["receiver"].lower())
         tombstoned = conn.execute(
             "SELECT 1 FROM tombstones WHERE target_origin_id = ? AND target_seq = ?",
             (record["origin_id"], record["seq"])).fetchone()
