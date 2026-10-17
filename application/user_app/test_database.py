@@ -219,16 +219,14 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(c.post("/api/sync", json={"nope": []}).status_code, 400)
         self.assertEqual(c.post("/api/sync", json={"messages": [{"seq": 1}]}).status_code, 400)
 
-    def test_global_sync(self):
+    def test_global_load(self):
         c = self.client
-        spring = {"id": "w1", "category": "Water", "name": "Spring", "latitude": 1, "longitude": 2,
-                  "time_updated": 10}
-        self.assertEqual(c.post("/api/global/sync", json={"locales": [spring]}).status_code, 400)
-        r = c.post("/api/global/sync", json={"server_time": 100, "full": True, "locales": [spring]})
-        self.assertEqual(r.json, {"updated": 1, "deleted": 0})
+        spring = {"id": "w1", "category": "Water", "name": "Spring", "latitude": 1, "longitude": 2}
+        self.assertEqual(c.post("/api/global/load", json={}).status_code, 400)
+        self.assertEqual(c.post("/api/global/load", json={"locales": [spring]}).json, {"locales": 1})
         self.assertEqual(c.get("/api/global/locales").json[0]["category"], "water")
         self.assertEqual(c.get("/api/global/categories").json, [{"category": "water", "count": 1}])
-        self.assertEqual(c.get("/api/global/sync").json["server_time"], 100)
+        self.assertIsNotNone(c.get("/api/global/info").json["loaded_at"])
 
 
 class GlobalDatabaseTest(unittest.TestCase):
@@ -240,32 +238,21 @@ class GlobalDatabaseTest(unittest.TestCase):
         self.tmp.cleanup()
 
     @staticmethod
-    def locale(id, category="water", time_updated=10.0, **extra):
-        return {"id": id, "category": category, "name": id, "latitude": 1.0, "longitude": 2.0,
-                "time_updated": time_updated, **extra}
+    def locale(id, category="water"):
+        return {"id": id, "category": category, "name": id, "latitude": 1.0, "longitude": 2.0}
 
-    def test_incremental_sync(self):
-        self.db.sync({"server_time": 1, "locales": [self.locale("a"), self.locale("b", "campsite")]})
-        # newer change applies, older one is ignored, deleted ones are removed
-        counts = self.db.sync({"server_time": 2, "locales": [
-            self.locale("a", "campsite", 20.0), self.locale("b", "water", 5.0),
-            self.locale("c", deleted=True)]})
-        self.assertEqual(counts, {"updated": 1, "deleted": 0})
-        self.assertEqual({l["id"]: l["category"] for l in self.db.locales()},
-                         {"a": "campsite", "b": "campsite"})
-        self.db.sync({"server_time": 3, "locales": [{"id": "a", "deleted": True}]})
-        self.assertEqual([l["id"] for l in self.db.locales()], ["b"])
-
-    def test_full_sync_replaces_everything(self):
-        self.db.sync({"server_time": 1, "locales": [self.locale("a"), self.locale("b")]})
-        self.db.sync({"server_time": 2, "full": True, "locales": [self.locale("c")]})
+    def test_load_replaces_everything(self):
+        self.assertIsNone(self.db.info()["loaded_at"])
+        self.db.load({"locales": [self.locale("a"), self.locale("b", "campsite")]})
+        self.db.load({"locales": [self.locale("c")]})
         self.assertEqual([l["id"] for l in self.db.locales()], ["c"])
+        self.assertIsNotNone(self.db.info()["loaded_at"])
 
-    def test_bad_record_rolls_back(self):
+    def test_bad_record_changes_nothing(self):
+        self.db.load({"locales": [self.locale("a")]})
         with self.assertRaises(ValueError):
-            self.db.sync({"server_time": 1, "locales": [self.locale("a"), {"id": "b"}]})
-        self.assertEqual(self.db.locales(), [])
-        self.assertIsNone(self.db.sync_state()["server_time"])
+            self.db.load({"locales": [self.locale("b"), {"id": "c"}]})
+        self.assertEqual([l["id"] for l in self.db.locales()], ["a"])
 
 
 if __name__ == "__main__":

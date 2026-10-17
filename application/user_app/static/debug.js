@@ -1,9 +1,9 @@
 // Debug tab: shows everything in the local database via the /api endpoints.
 
 const DEBUG_TABLES = ["messages", "locales", "geolocations", "tombstones"];
-const GLOBAL_DEBUG_TABLES = { global_locales: "/api/global/locales", global_sync: "/api/global/sync" };
+const GLOBAL_DEBUG_TABLES = { global_locales: "/api/global/locales", global_info: "/api/global/info" };
 const TIME_FIELDS = new Set(["time_created", "time_received", "last_server_sync",
-                             "time_updated", "server_time", "synced_at"]);
+                             "loaded_at"]);
 
 function el(tag, text, className) {
   const node = document.createElement(tag);

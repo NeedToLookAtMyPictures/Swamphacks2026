@@ -7,8 +7,7 @@
       "name": "Lake Alice spigot",
       "latitude": 29.6436,
       "longitude": -82.3612,
-      "description": "Potable tap by the boardwalk",
-      "time_updated": 1792000000
+      "description": "Potable tap by the boardwalk"
     },
     {
       "id": "water-bivens-arm",
@@ -16,8 +15,7 @@
       "name": "Bivens Arm hand pump",
       "latitude": 29.6262,
       "longitude": -82.3416,
-      "description": "Hand pump; filter before drinking",
-      "time_updated": 1792000000
+      "description": "Hand pump; filter before drinking"
     },
     {
       "id": "water-depot-park",
@@ -25,8 +23,7 @@
       "name": "Depot Park fountain",
       "latitude": 29.6436,
       "longitude": -82.3195,
-      "description": "Drinking fountain by the playground",
-      "time_updated": 1792000000
+      "description": "Drinking fountain by the playground"
     },
     {
       "id": "water-sweetwater",
@@ -34,8 +31,7 @@
       "name": "Sweetwater Wetlands tap",
       "latitude": 29.6132,
       "longitude": -82.3218,
-      "description": "Tap at the parking lot kiosk",
-      "time_updated": 1792000000
+      "description": "Tap at the parking lot kiosk"
     },
     {
       "id": "water-hogtown",
@@ -43,8 +39,7 @@
       "name": "Hogtown Creek",
       "latitude": 29.6655,
       "longitude": -82.387,
-      "description": "Creek water; must be treated",
-      "time_updated": 1792000000
+      "description": "Creek water; must be treated"
     },
     {
       "id": "water-morningside",
@@ -52,8 +47,7 @@
       "name": "Morningside cistern",
       "latitude": 29.6612,
       "longitude": -82.2842,
-      "description": "Rain cistern; treat before drinking",
-      "time_updated": 1792000000
+      "description": "Rain cistern; treat before drinking"
     },
     {
       "id": "water-boulware",
@@ -61,8 +55,7 @@
       "name": "Boulware Springs",
       "latitude": 29.6229,
       "longitude": -82.3075,
-      "description": "Historic spring house; tap outside",
-      "time_updated": 1792000000
+      "description": "Historic spring house; tap outside"
     },
     {
       "id": "camp-sweetwater",
@@ -70,8 +63,7 @@
       "name": "Sweetwater camp",
       "latitude": 29.6195,
       "longitude": -82.3305,
-      "description": "6 sites, fire rings, flat ground",
-      "time_updated": 1792000000
+      "description": "6 sites, fire rings, flat ground"
     },
     {
       "id": "camp-hogtown",
@@ -79,8 +71,7 @@
       "name": "Hogtown Creek camp",
       "latitude": 29.665,
       "longitude": -82.382,
-      "description": "Primitive, 3 sites",
-      "time_updated": 1792000000
+      "description": "Primitive, 3 sites"
     },
     {
       "id": "camp-morningside",
@@ -88,8 +79,7 @@
       "name": "Morningside meadow camp",
       "latitude": 29.659,
       "longitude": -82.281,
-      "description": "4 sites near the farmhouse",
-      "time_updated": 1792000000
+      "description": "4 sites near the farmhouse"
     },
     {
       "id": "camp-loblolly",
@@ -97,8 +87,7 @@
       "name": "Loblolly Woods camp",
       "latitude": 29.6575,
       "longitude": -82.3915,
-      "description": "2 sites, shaded",
-      "time_updated": 1792000000
+      "description": "2 sites, shaded"
     },
     {
       "id": "camp-prairie-rim",
@@ -106,8 +95,7 @@
       "name": "Prairie rim camp",
       "latitude": 29.604,
       "longitude": -82.316,
-      "description": "Overlooks Paynes Prairie; no fires",
-      "time_updated": 1792000000
+      "description": "Overlooks Paynes Prairie; no fires"
     },
     {
       "id": "shelter-loblolly",
@@ -115,8 +103,7 @@
       "name": "Loblolly shelter",
       "latitude": 29.656,
       "longitude": -82.39,
-      "description": "Covered, sleeps 8",
-      "time_updated": 1792000000
+      "description": "Covered, sleeps 8"
     },
     {
       "id": "shelter-morningside",
@@ -124,8 +111,7 @@
       "name": "Morningside barn",
       "latitude": 29.6625,
       "longitude": -82.286,
-      "description": "Open barn, sleeps 12",
-      "time_updated": 1792000000
+      "description": "Open barn, sleeps 12"
     },
     {
       "id": "shelter-depot",
@@ -133,8 +119,7 @@
       "name": "Depot Park pavilion",
       "latitude": 29.6445,
       "longitude": -82.321,
-      "description": "Covered pavilion, no walls",
-      "time_updated": 1792000000
+      "description": "Covered pavilion, no walls"
     },
     {
       "id": "trailhead-boulware",
@@ -142,8 +127,7 @@
       "name": "Gainesville-Hawthorne Trail (Boulware)",
       "latitude": 29.6234,
       "longitude": -82.3062,
-      "description": "Paved rail trail heading east",
-      "time_updated": 1792000000
+      "description": "Paved rail trail heading east"
     },
     {
       "id": "trailhead-hogtown",
@@ -151,8 +135,7 @@
       "name": "Hogtown Creek Greenway",
       "latitude": 29.67,
       "longitude": -82.38,
-      "description": "Boardwalk and dirt trail",
-      "time_updated": 1792000000
+      "description": "Boardwalk and dirt trail"
     },
     {
       "id": "trailhead-sweetwater",
@@ -160,8 +143,7 @@
       "name": "Sweetwater Wetlands loop",
       "latitude": 29.614,
       "longitude": -82.323,
-      "description": "3 mile loop, watch for alligators",
-      "time_updated": 1792000000
+      "description": "3 mile loop, watch for alligators"
     },
     {
       "id": "trailhead-bivens",
@@ -169,8 +151,7 @@
       "name": "Bivens Arm boardwalk",
       "latitude": 29.627,
       "longitude": -82.34,
-      "description": "Short boardwalk loop",
-      "time_updated": 1792000000
+      "description": "Short boardwalk loop"
     },
     {
       "id": "restroom-depot",
@@ -178,8 +159,7 @@
       "name": "Depot Park restrooms",
       "latitude": 29.643,
       "longitude": -82.3185,
-      "description": "Open 6am-10pm",
-      "time_updated": 1792000000
+      "description": "Open 6am-10pm"
     },
     {
       "id": "restroom-sweetwater",
@@ -187,8 +167,7 @@
       "name": "Sweetwater restrooms",
       "latitude": 29.6128,
       "longitude": -82.3225,
-      "description": "By the parking lot",
-      "time_updated": 1792000000
+      "description": "By the parking lot"
     },
     {
       "id": "restroom-boulware",
@@ -196,8 +175,7 @@
       "name": "Boulware Springs restrooms",
       "latitude": 29.6232,
       "longitude": -82.307,
-      "description": "",
-      "time_updated": 1792000000
+      "description": ""
     },
     {
       "id": "firstaid-ranger",
@@ -205,8 +183,7 @@
       "name": "Ranger station",
       "latitude": 29.642,
       "longitude": -82.326,
-      "description": "First aid kit and AED; staffed daytime",
-      "time_updated": 1792000000
+      "description": "First aid kit and AED; staffed daytime"
     },
     {
       "id": "firstaid-morningside",
@@ -214,8 +191,7 @@
       "name": "Morningside office",
       "latitude": 29.6605,
       "longitude": -82.285,
-      "description": "First aid kit",
-      "time_updated": 1792000000
+      "description": "First aid kit"
     }
   ]
 }

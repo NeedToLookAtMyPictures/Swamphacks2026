@@ -97,41 +97,31 @@ curl -X POST localhost:5000/api/device -H 'content-type: application/json' -d '{
 ### Global database
 
 `global_database.py` keeps a second SQLite database at `data/global.db`
-(git-ignored) for data set by the company and synced from the server. Users
-never change it: the only writer is the server sync.
+(git-ignored) for data set by the company. It is loaded once from the server
+at setup; users never change it.
 
 | Table | Key | Notes |
 |---|---|---|
-| `global_locales` | id | fixed places: `category` (water, campsite, ...), `name`, `latitude`, `longitude`, `description`, `time_updated` |
-| `global_sync` | single row | `server_time` of the last sync (send back as `since`), `synced_at` |
+| `global_locales` | id | fixed places: `category` (water, campsite, ...), `name`, `latitude`, `longitude`, `description` |
+| `global_info` | single row | `loaded_at`: when the data was loaded |
 
 A global locale's `id` is what user `locales` records (reviews/comments) put in
 their `location`.
 
-The server sends `POST /api/global/sync` with
-`{server_time, full?, locales: [...]}`. With `full: true` everything is
-replaced; otherwise each locale is added or updated (if its `time_updated` is
-not older than ours), and one with `"deleted": true` is removed.
-
-Until the server exists, load a file in the same format:
+The server sends `POST /api/global/load` with `{locales: [...]}`, which
+replaces everything. Until the server exists, load the example file (real
+Gainesville parks with made-up amenities: 24 locales in 6 categories):
 
 ```bash
-python global_database.py load sample_global_locales.json   # full: 24 locales in 6 categories
-python global_database.py load sample_global_update.json    # then an incremental update
+python global_database.py load sample_global_locales.json
 ```
-
-The example places are real Gainesville parks, but their amenities are made up.
-The update changes one locale (Bivens Arm pump marked broken), adds two
-(Paynes Prairie north camp and tap), deletes one (Prairie rim camp), and
-includes a stale edit to Depot Park fountain that is ignored because it is
-older than what the device has. Load `sample_global_locales.json` again to reset.
 
 | Method | Path | What it does |
 |---|---|---|
 | GET | `/api/global/locales?category=` | global locales, sorted by category then name |
 | GET | `/api/global/categories` | each category with its count |
-| GET | `/api/global/sync` | when the global data was last synced |
-| POST | `/api/global/sync` | apply data from the server |
+| GET | `/api/global/info` | when the global data was loaded |
+| POST | `/api/global/load` | load the data from the server (replaces everything) |
 
 Tests: `python -m unittest test_database`
 

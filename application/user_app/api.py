@@ -20,11 +20,11 @@ Syncing with another device or the server
     GET    /api/sync?since=<time>           everything this device shares
     POST   /api/sync                        merge records {locales: [...], messages: [...], ...}
 
-Global data (set by the company, synced from the server; users can't change it)
+Global data (set by the company, loaded once from the server; users can't change it)
     GET    /api/global/locales?category=    water sources, campsites, ...
     GET    /api/global/categories           each category with its count
-    GET    /api/global/sync                 {server_time, synced_at} of the last server sync
-    POST   /api/global/sync                 from the server: {server_time, full?, locales: [...]}
+    GET    /api/global/info                 {loaded_at}
+    POST   /api/global/load                 from the server: {locales: [...]}; replaces everything
 """
 
 import sqlite3
@@ -188,11 +188,11 @@ def global_categories():
     return jsonify(global_db().categories())
 
 
-@api.get("/global/sync")
-def global_sync_state():
-    return jsonify(global_db().sync_state())
+@api.get("/global/info")
+def global_info():
+    return jsonify(global_db().info())
 
 
-@api.post("/global/sync")
-def global_sync():
-    return jsonify(global_db().sync(body("server_time")))
+@api.post("/global/load")
+def global_load():
+    return jsonify(global_db().load(body("locales")))

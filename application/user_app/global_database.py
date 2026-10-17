@@ -1,7 +1,8 @@
-"""Global SQLite database: data set by the company and synced from the server.
+"""Global SQLite database: data set by the company and loaded from the server.
 
-Separate from the user's own database (database.py). Users never change it;
-the only writer is sync(), which applies what the server sends.
+Separate from the user's own database (database.py). It is set once, from the
+server at setup; users never change it. The only writer is load(), which
+replaces everything.
 
 Global locales are fixed places such as water sources and campsites. Their `id`
 is what user locale records (reviews/comments) refer to in their `location`.
@@ -18,43 +19,44 @@ import time
 from pathlib import Path
 
 DEFAULT_GLOBAL_DB_PATH = Path(__file__).resolve().parent / "data" / "global.db"
-GLOBAL_SCHEMA_VERSION = 1
+GLOBAL_SCHEMA_VERSION = 2
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS global_locales (
-    id           TEXT    PRIMARY KEY,  -- set by the server; user locales refer to it
-    category     TEXT    NOT NULL,     -- e.g. water, campsite
-    name         TEXT    NOT NULL,
-    latitude     REAL    NOT NULL,
-    longitude    REAL    NOT NULL,
-    description  TEXT    NOT NULL DEFAULT '',
-    time_updated REAL    NOT NULL      -- server time of the last change
+    id          TEXT PRIMARY KEY,  -- set by the server; user locales refer to it
+    category    TEXT NOT NULL,     -- e.g. water, campsite
+    name        TEXT NOT NULL,
+    latitude    REAL NOT NULL,
+    longitude   REAL NOT NULL,
+    description TEXT NOT NULL DEFAULT ''
 );
 
--- Exactly one row: when this device last synced the global data
-CREATE TABLE IF NOT EXISTS global_sync (
-    id          INTEGER PRIMARY KEY CHECK (id = 1),
-    server_time REAL,  -- server's clock at the last sync; send it back as `since`
-    synced_at   REAL   -- this device's clock at the last sync
+-- Exactly one row: when the global data was loaded
+CREATE TABLE IF NOT EXISTS global_info (
+    id        INTEGER PRIMARY KEY CHECK (id = 1),
+    loaded_at REAL  -- NULL until loaded from the server
 );
-INSERT OR IGNORE INTO global_sync (id) VALUES (1);
+INSERT OR IGNORE INTO global_info (id) VALUES (1);
 """
 
-LOCALE_COLUMNS = ("id", "category", "name", "latitude", "longitude", "description",
-                  "time_updated")
+LOCALE_COLUMNS = ("id", "category", "name", "latitude", "longitude", "description")
 
 
 class GlobalDatabase:
     def __init__(self, path=DEFAULT_GLOBAL_DB_PATH):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        version = self._version()
+        if version not in (0, GLOBAL_SCHEMA_VERSION):
+            # Only a copy of server data, so an old file can just be replaced
+            self.path.unlink()
         with self._connect() as conn:
-            version = conn.execute("PRAGMA user_version").fetchone()[0]
-            has_tables = conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table'").fetchone()
-            if has_tables and version != GLOBAL_SCHEMA_VERSION:
-                raise RuntimeError(f"{self.path} uses an old schema; delete it and restart")
             conn.executescript(SCHEMA)
             conn.execute(f"PRAGMA user_version = {GLOBAL_SCHEMA_VERSION}")
+
+    def _version(self):
+        with self._connect() as conn:
+            return conn.execute("PRAGMA user_version").fetchone()[0]
 
     @contextlib.contextmanager
     def _connect(self):
@@ -83,63 +85,40 @@ class GlobalDatabase:
                 "SELECT category, COUNT(*) AS count FROM global_locales "
                 "GROUP BY category ORDER BY category")]
 
-    def sync_state(self):
+    def info(self):
         with self._connect() as conn:
-            row = dict(conn.execute("SELECT server_time, synced_at FROM global_sync").fetchone())
-        return row
+            return dict(conn.execute("SELECT loaded_at FROM global_info").fetchone())
 
-    # -- syncing from the server ------------------------------------------------
+    # -- loading from the server --------------------------------------------------
 
-    def sync(self, data):
-        """Apply global data from the server.
+    def load(self, data):
+        """Replace all global data with what the server sends.
 
-        data = {
-            "server_time": <server clock now>,
-            "full": true to replace everything (otherwise only changes since our last sync),
-            "locales": [{id, category, name, latitude, longitude, description?, time_updated,
-                         deleted?}, ...],
-        }
-        A locale with "deleted": true is removed. Returns counts of what changed.
+        data = {"locales": [{id, category, name, latitude, longitude, description?}, ...]}
+        Returns how many locales were loaded. Nothing changes if any record is bad.
         """
-        if not isinstance(data, dict) or data.get("server_time") is None:
-            raise ValueError("expected {server_time, locales, full?}")
-        records = data.get("locales", [])
+        records = data.get("locales") if isinstance(data, dict) else None
         if not isinstance(records, list):
-            raise ValueError("locales must be a list")
-        counts = {"updated": 0, "deleted": 0}
+            raise ValueError("expected {locales: [...]}")
+        rows = [self._clean(r) for r in records]
         with self._connect() as conn:
-            if data.get("full"):
-                counts["deleted"] += conn.execute("DELETE FROM global_locales").rowcount
-            for record in records:
-                if record.get("deleted"):
-                    counts["deleted"] += conn.execute(
-                        "DELETE FROM global_locales WHERE id = ?", (self._require(record, "id"),)
-                    ).rowcount
-                    continue
-                cur = conn.execute(
-                    f"INSERT INTO global_locales ({', '.join(LOCALE_COLUMNS)}) "
-                    f"VALUES ({', '.join(':' + c for c in LOCALE_COLUMNS)}) "
-                    "ON CONFLICT (id) DO UPDATE SET "
-                    + ", ".join(f"{c} = excluded.{c}" for c in LOCALE_COLUMNS[1:])
-                    + " WHERE excluded.time_updated >= global_locales.time_updated",
-                    self._clean(record))
-                counts["updated"] += cur.rowcount
-            conn.execute("UPDATE global_sync SET server_time = ?, synced_at = ?",
-                         (float(data["server_time"]), time.time()))
-        return counts
+            conn.execute("DELETE FROM global_locales")
+            conn.executemany(
+                f"INSERT INTO global_locales ({', '.join(LOCALE_COLUMNS)}) "
+                f"VALUES ({', '.join(':' + c for c in LOCALE_COLUMNS)})", rows)
+            conn.execute("UPDATE global_info SET loaded_at = ?", (time.time(),))
+        return {"locales": len(rows)}
 
     # -- helpers -------------------------------------------------------------------
 
     @staticmethod
-    def _require(record, field):
-        if record.get(field) in (None, ""):
-            raise ValueError(f"global locale is missing {field}")
-        return record[field]
-
-    @classmethod
-    def _clean(cls, record):
-        for field in ("id", "category", "name", "latitude", "longitude", "time_updated"):
-            cls._require(record, field)
+    def _clean(record):
+        if not isinstance(record, dict):
+            raise ValueError("each global locale must be an object")
+        missing = [f for f in ("id", "category", "name", "latitude", "longitude")
+                   if record.get(f) in (None, "")]
+        if missing:
+            raise ValueError(f"global locale is missing {', '.join(missing)}")
         return {
             "id": str(record["id"]),
             "category": str(record["category"]).strip().lower(),
@@ -147,7 +126,6 @@ class GlobalDatabase:
             "latitude": float(record["latitude"]),
             "longitude": float(record["longitude"]),
             "description": str(record.get("description") or ""),
-            "time_updated": float(record["time_updated"]),
         }
 
 
@@ -157,11 +135,7 @@ def main():
     load = sub.add_parser("load", help="replace the global data with a JSON file in the server's format")
     load.add_argument("file", type=Path)
     args = parser.parse_args()
-
-    data = json.loads(args.file.read_text())
-    data.setdefault("full", True)
-    data.setdefault("server_time", time.time())
-    print(GlobalDatabase().sync(data))
+    print(GlobalDatabase().load(json.loads(args.file.read_text())))
 
 
 if __name__ == "__main__":
