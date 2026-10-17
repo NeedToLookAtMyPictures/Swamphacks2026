@@ -37,12 +37,15 @@ python download_locales.py map --source some-local-file.pmtiles
 python main.py                       # http://127.0.0.1:5000
 python main.py --host 0.0.0.0        # reachable from other devices on the LAN
 python main.py --host 0.0.0.0 --https   # same, over HTTPS (needed for GPS, see below)
-python main.py --server http://<server>:8000   # sync with this server when it's reachable
+python main.py --server http://<server>:8000   # sync with another server
+python main.py --server ""           # no server address, only look on the wifi
 python main.py --no-lan              # don't look for a server on the wifi
 ```
 
 A background thread looks for a server every 30 seconds and syncs whenever one
-answers: the one given with `--server` (or `SERVER_URL`), or else one on the
+answers: the one given with `--server` (or `SERVER_URL`), by default the demo
+server `http://10.138.191.107:8000` (`DEFAULT_SERVER_URL` in `main.py`; that
+laptop's wifi address can change, so update it there if syncing stops), or else one on the
 same wifi, found automatically. The app keeps working offline. See
 `../server/README.md`.
 

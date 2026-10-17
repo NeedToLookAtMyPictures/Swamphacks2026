@@ -3,7 +3,8 @@
 Usage:
     python download_locales.py map    # once, while online
     python main.py                    # start the web interface (works offline)
-    python main.py --server https://example.com   # sync with this server when it's reachable
+    python main.py --server https://example.com   # sync with another server (default: DEFAULT_SERVER_URL)
+    python main.py --server ""        # no server address, only look on the wifi
     python main.py --no-lan           # don't look for a server on the wifi
     python main.py --host 0.0.0.0 --https   # on a Raspberry Pi, for a phone to connect to
 """
@@ -22,6 +23,10 @@ from api import api
 from database import Database
 from global_database import GlobalDatabase
 from download_locales import DATA_DIR, DEFAULT_BBOX, MAP_FILE, MAP_INFO_FILE
+
+# The demo server (the laptop running application/server). Its wifi address can
+# change when it reconnects: check with `ip -4 addr show` and update it here.
+DEFAULT_SERVER_URL = "http://10.138.191.107:8000"
 
 CERT_FILE = DATA_DIR / "cert.pem"
 KEY_FILE = DATA_DIR / "key.pem"
@@ -121,10 +126,10 @@ def main():
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=5000)
     parser.add_argument("--debug", action="store_true")
-    parser.add_argument("--server", default=os.environ.get("SERVER_URL"),
+    parser.add_argument("--server", default=os.environ.get("SERVER_URL", DEFAULT_SERVER_URL),
                         help="server to sync with whenever it can be reached "
-                             "(default: $SERVER_URL). Without it, or when it can't be "
-                             "reached, a server on the same wifi is used")
+                             f"(default: $SERVER_URL, else {DEFAULT_SERVER_URL}; \"\" for "
+                             "none). When it can't be reached, a server on the same wifi is used")
     parser.add_argument("--no-lan", action="store_true",
                         help="don't look for a server on the wifi")
     parser.add_argument("--https", action="store_true",
