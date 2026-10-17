@@ -26,6 +26,16 @@ ESP_USB_VIDS = {
     0x10C4,  # Silicon Labs CP2102: the USB-UART chip on Heltec WiFi LoRa 32 V3 boards
 }
 
+# USB-to-UART bridge chips that dev boards without native USB (classic ESP32
+# DevKits) put in front of the chip. They show up as /dev/ttyUSB* on Linux.
+# Other gadgets use these chips too, so they are only tried when no board
+# above is plugged in.
+USB_UART_BRIDGE_VIDS = {
+    0x10C4,  # Silicon Labs CP210x
+    0x1A86,  # WCH CH340 / CH9102
+    0x0403,  # FTDI
+}
+
 
 class TransportError(OSError):
     """The pipe failed or can't be opened (board unplugged, wrong port, no permission)."""
@@ -133,7 +143,10 @@ class PySerialTransport(Transport):
     def _find_board(self) -> str:
         from serial.tools import list_ports
 
-        found = [p for p in list_ports.comports() if p.vid in ESP_USB_VIDS]
+        ports = list_ports.comports()
+        found = [p for p in ports if p.vid in ESP_USB_VIDS]
+        if not found:
+            found = [p for p in ports if p.vid in USB_UART_BRIDGE_VIDS]
         if len(found) == 1:
             return found[0].device
         if not found:
