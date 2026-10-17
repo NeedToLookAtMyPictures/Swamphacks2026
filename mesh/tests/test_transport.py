@@ -202,6 +202,26 @@ class CdcDescriptor(unittest.TestCase):
             termux_usb.find_cdc(config(interface(0, 0xFF, 2), endpoint(0x01, 2), endpoint(0x81, 2)))
 
 
+class BridgeChips(unittest.TestCase):
+    def test_cp2102_bulk_pair(self):  # CP2102: one vendor interface, bulk in/out
+        cfg = config(interface(0, 0xFF, 2), endpoint(0x81, 2), endpoint(0x01, 2))
+        self.assertEqual(termux_usb.find_bulk(cfg), (0, 0x81, 0x01))
+
+    def test_ch340_skips_interrupt_endpoint(self):  # CH340: bulk out, bulk in, interrupt in
+        cfg = config(interface(0, 0xFF, 3), endpoint(0x02, 2), endpoint(0x82, 2), endpoint(0x81, 3))
+        self.assertEqual(termux_usb.find_bulk(cfg), (0, 0x82, 0x02))
+
+    def test_no_bulk(self):
+        with self.assertRaises(TransportError):
+            termux_usb.find_bulk(config(interface(0, 0xFF, 1), endpoint(0x81, 3)))
+
+    def test_ch340_divisors(self):  # values the Linux ch341 driver computes
+        self.assertEqual(termux_usb.ch34x_divisor(9600), 0xB202)
+        self.assertEqual(termux_usb.ch34x_divisor(115200), 0xCC03)
+        self.assertEqual(termux_usb.ch34x_divisor(460800), 0xF303)
+        self.assertEqual(termux_usb.ch34x_divisor(921600), 0xF307)
+
+
 class TermuxRerun(unittest.TestCase):
     def test_reruns_under_termux_usb_and_exits_with_its_code(self):
         calls = []

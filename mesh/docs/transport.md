@@ -7,17 +7,20 @@ which transport is in use.
 
 | Transport | Where | How |
 |---|---|---|
-| `PySerialTransport` (transport.py) | Windows, macOS, Linux | Opens the board's USB CDC port with pyserial (`COM3`, `/dev/ttyACM0`, `/dev/cu.usbmodem...`). Also pyserial URLs such as `socket://127.0.0.1:5000`, used by the tests. |
-| `TermuxUsbTransport` (termux_usb.py) | Android, in Termux | Android apps can't open serial ports. `termux-usb` hands the program a USB file descriptor; this transport drives the board's USB CDC interface through libusb. |
+| `PySerialTransport` (transport.py) | Windows, macOS, Linux | Opens the board's serial port with pyserial (`COM3`, `/dev/ttyACM0`, `/dev/ttyUSB0`, `/dev/cu.usbmodem...`). Also pyserial URLs such as `socket://127.0.0.1:5000`, used by the tests. |
+| `TermuxUsbTransport` (termux_usb.py) | Android, in Termux | Android apps can't open serial ports. `termux-usb` hands the program a USB file descriptor; this transport drives the board's USB CDC interface, or its CP210x / CH340 USB-serial chip, through libusb. |
 
-Both talk to the **same USB interface** on the board (USB CDC, the standard
-"virtual serial port" class), so the firmware is the same everywhere.
+Both see the board as a plain serial port, so the firmware is the same
+everywhere. An ESP32-S3 on its native USB is USB CDC (the standard "virtual
+serial port" class). Boards like the classic ESP32 DevKit put a USB-serial chip
+in front of the ESP32 instead (`/dev/ttyUSB0` on Linux): the OS drives those on
+laptops, and `TermuxUsbTransport` drives CP210x and CH340 chips itself (not FTDI).
 
 ## Choosing a transport: the port string
 
 | `port` | Transport |
 |---|---|
-| `auto` (default) | Android: Termux, the one USB device plugged in. Elsewhere: pyserial, the one port whose USB vendor is Espressif (0x303A) or Adafruit (0x239A). |
+| `auto` (default) | Android: Termux, the one USB device plugged in. Elsewhere: pyserial, the one port whose USB vendor is Espressif (0x303A) or Adafruit (0x239A); failing that, a CP210x (0x10C4), CH340 (0x1A86) or FTDI (0x0403) USB-serial chip. |
 | `termux-usb` | Termux, the one USB device plugged in |
 | `/dev/bus/usb/001/002` | Termux, that device (from `termux-usb -l`) |
 | anything else | pyserial |
@@ -62,8 +65,12 @@ Nothing in the link or the protocol changes.
    exit code. Ctrl-c goes to the rerun.
 3. In the rerun, `TERMUX_USB_FD` holds the device's file descriptor. The
    transport wraps it with libusb (with device discovery off, since that
-   needs root), finds the CDC interfaces in the configuration descriptor,
-   claims them, clears the endpoints, and turns DTR on (RTS off).
+   needs root) and reads the vendor id. A CP210x or CH340 gets its own setup
+   (enable the UART, baud rate, 8N1, DTR and RTS off so the DevKit's
+   auto-reset circuit leaves the ESP32 running), following the Linux drivers.
+   Anything else must be CDC: the transport finds the CDC interfaces in the
+   configuration descriptor, claims them, clears the endpoints, and turns DTR
+   on (RTS off).
 
 **Limits:**
 
@@ -84,4 +91,6 @@ Nothing in the link or the protocol changes.
 **Not done:** USB CDC on Android hasn't run on a phone yet. The descriptor parsing,
 the rerun and the link's lost-board handling are unit-tested
 (`tests/test_transport.py`), and the libusb calls were checked against a real
-libusb on Linux, but not with a board attached.
+libusb on Linux, but not with a board attached. The CP210x and CH340 setup
+follows the Linux drivers' requests; the CH340 baud divisors are unit-tested
+against the values Linux computes.
