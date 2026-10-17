@@ -1,0 +1,16 @@
+{
+  "name": "Gainesville to Hawthorne, Florida",
+  "source": "https://build.protomaps.com/20261017.pmtiles",
+  "bbox": [
+    -82.42,
+    29.56,
+    -82.05,
+    29.73
+  ],
+  "center": [
+    29.645,
+    -82.235
+  ],
+  "min_zoom": 8,
+  "max_zoom": 15
+}

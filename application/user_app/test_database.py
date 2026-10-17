@@ -5,12 +5,44 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from flask import Flask
 
+import server_sync
 from api import api
-from database import MESSAGE_TTL, Database, DeviceNotInitialized
+from database import MESSAGE_TTL, SCHEMA, Database, DeviceNotInitialized
 from global_database import GlobalDatabase
+
+
+class FakeServer:
+    """Stands in for the sync server, so account creation can reserve names."""
+
+    def __init__(self, reachable=True):
+        self.reachable = reachable
+        self.names = {}
+        self.current = None
+
+    def find(self):
+        return "http://fake" if self.reachable else None
+
+    def describe(self):
+        return "a fake server"
+
+    def register(self, _url, name, device_id=None):
+        if name.lower() in self.names and self.names[name.lower()] != device_id:
+            raise server_sync.ServerError("409: taken")
+        self.names[name.lower()] = device_id or "d-" + name.lower()
+        return {"name": name, "device_id": self.names[name.lower()]}
+
+    def install(self, app, test):
+        """Use this as app's server for the rest of the test."""
+        app.config["SERVER"] = self
+        for name, fake in (("register", self.register),
+                           ("sync_once", lambda *_: None)):
+            patcher = mock.patch.object(server_sync, name, fake)
+            patcher.start()
+            test.addCleanup(patcher.stop)
 
 
 def make_db(tmp, name, device_id):
@@ -68,6 +100,70 @@ class DatabaseTest(unittest.TestCase):
 
         self.carol.merge(self.bob.export())
         self.assertTrue(self.carol.get("messages", "d-alice", 1)["is_dead"])
+
+    def test_sender_sees_received_only_from_tombstone_within_31_days(self):
+        msg = self.alice.add_message("bob", "hi")
+        self.bob.merge(self.alice.export())
+        self.alice.merge(self.bob.export())     # tombstone reaches alice in time
+        message = self.alice.get("messages", "d-alice", msg["seq"])
+        self.assertTrue(message["is_dead"])
+        self.assertTrue(message["received"])
+        self.assertNotIn("received", self.alice.export()["messages"][0])  # local only
+
+        # the tombstone reaches alice after the message is 31 days old: received or died
+        late = self.alice.add_message("bob", "late")
+        self.bob.merge(self.alice.export())
+        with self.alice._connect() as conn:
+            conn.execute("UPDATE messages SET time_created = ? WHERE seq = ?",
+                         (time.time() - MESSAGE_TTL - 10, late["seq"]))
+        self.alice.merge(self.bob.export())
+        message = self.alice.get("messages", "d-alice", late["seq"])
+        self.assertTrue(message["is_dead"])
+        self.assertFalse(message["received"])
+
+    def test_expired_message_is_not_received(self):
+        msg = self.alice.add_message("bob", "hi")
+        with self.alice._connect() as conn:
+            conn.execute("UPDATE messages SET time_created = ?", (time.time() - MESSAGE_TTL - 10,))
+        self.alice.purge()
+        message = self.alice.get("messages", "d-alice", msg["seq"])
+        self.assertTrue(message["is_dead"])
+        self.assertFalse(message["received"])
+
+    def test_schema_2_gains_received_column(self):
+        path = Path(self.tmp.name) / "v2.db"
+        with sqlite3.connect(path) as conn:
+            conn.executescript(SCHEMA.replace(
+                "    received      INTEGER NOT NULL DEFAULT 0,  -- local only: delivered tombstone came within 31 days\n", ""))
+            conn.execute("PRAGMA user_version = 2")
+        conn.close()
+        db = Database(path)
+        db.init_device("erin")
+        db.add_message("bob", "hi")
+        self.assertEqual(db.list("messages")[0]["received"], 0)
+
+    def test_schema_3_gains_sync_cursors(self):
+        path = Path(self.tmp.name) / "v3.db"
+        with sqlite3.connect(path) as conn:
+            conn.executescript(SCHEMA)
+            conn.execute("ALTER TABLE device_info DROP COLUMN last_push")
+            conn.execute("ALTER TABLE device_info DROP COLUMN server_cursor")
+            conn.execute("PRAGMA user_version = 3")
+        conn.close()
+        db = Database(path)
+        db.init_device("erin")
+        self.assertIsNone(db.update_device(last_push=5.0)["server_cursor"])
+
+    def test_schema_4_gains_server_id(self):
+        path = Path(self.tmp.name) / "v4.db"
+        with sqlite3.connect(path) as conn:
+            conn.executescript(SCHEMA)
+            conn.execute("ALTER TABLE device_info DROP COLUMN server_id")
+            conn.execute("PRAGMA user_version = 4")
+        conn.close()
+        db = Database(path)
+        db.init_device("erin")
+        self.assertEqual(db.update_device(server_id="s1")["server_id"], "s1")
 
     def test_dead_message_is_not_picked_up(self):
         msg = self.alice.add_message("bob", "hi")
@@ -175,6 +271,8 @@ class ApiTest(unittest.TestCase):
         app.config["GLOBAL_DATABASE"] = GlobalDatabase(Path(self.tmp.name) / "global.db")
         app.register_blueprint(api)
         self.client = app.test_client()
+        self.server = FakeServer()
+        self.server.install(app, self)
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -218,6 +316,22 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(c.get("/api/nope").status_code, 404)
         self.assertEqual(c.post("/api/sync", json={"nope": []}).status_code, 400)
         self.assertEqual(c.post("/api/sync", json={"messages": [{"seq": 1}]}).status_code, 400)
+
+    def test_account_needs_the_server(self):
+        c = self.client
+        self.server.reachable = False
+        r = c.post("/api/device", json={"name": "alice"})
+        self.assertEqual(r.status_code, 503)
+        self.assertIn("server", r.json["error"])
+        self.assertEqual(c.get("/api/device").status_code, 409)  # nothing was created
+        self.server.reachable = True
+        self.server.register("x", "alice", "d-someone-else")
+        self.assertEqual(c.post("/api/device", json={"name": "ALICE"}).status_code, 409)
+        self.assertEqual(c.post("/api/device", json={"name": "two words"}).status_code, 400)
+        r = c.post("/api/device", json={"name": "bob"})
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(r.json["device_id"], "d-bob")  # the ID the server handed out
+        self.assertEqual(c.get("/api/server").json["looking_for"], "a fake server")
 
     def test_global_load(self):
         c = self.client

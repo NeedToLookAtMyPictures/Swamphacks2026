@@ -47,26 +47,40 @@ function renderTable(title, rows) {
   return section;
 }
 
-function renderDeviceSetup(content) {
-  // No identity yet: offer to create one so the rest of the API can be used
+function renderDeviceSetup(content, server) {
+  // No identity yet: create one. Names are reserved on the server, so it must be reachable.
   const section = el("div", undefined, "debug-section");
   section.appendChild(el("h3", "device_info"));
   section.appendChild(el("p", "Device not initialized. Its name and IDs can't be changed later."));
+  section.appendChild(el("p", `Creating an account reserves your name on the server, so it ` +
+    `needs ${server.looking_for}: connect to the internet or to the server's wifi first.`));
   const form = el("form", undefined, "debug-form");
   const input = el("input");
   input.placeholder = "Name";
   input.required = true;
-  form.append(input, el("button", "Create device"));
+  const button = el("button", "Create device");
+  form.append(input, button);
+  const error = el("p", undefined, "debug-error");
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
-    await fetch("/api/device", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: input.value }),
-    });
-    loadDebug();
+    button.disabled = true;
+    error.textContent = "Contacting the server…";
+    try {
+      const res = await fetch("/api/device", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: input.value }),
+      });
+      if (!res.ok) {
+        error.textContent = (await res.json()).error;
+        return;
+      }
+      loadDebug();
+    } finally {
+      button.disabled = false;
+    }
   });
-  section.appendChild(form);
+  section.append(form, error);
   content.appendChild(section);
 }
 
@@ -76,6 +90,7 @@ async function loadDebug() {
   status.textContent = "Loading…";
   try {
     const deviceRes = await fetch("/api/device");
+    const server = await fetch("/api/server").then((r) => r.json());
     const tables = await Promise.all(
       DEBUG_TABLES.map((t) => fetch(`/api/${t}`).then((r) => r.json())));
     const globalTables = await Promise.all(
@@ -85,8 +100,9 @@ async function loadDebug() {
     if (deviceRes.ok) {
       content.appendChild(renderTable("device_info", [await deviceRes.json()]));
     } else {
-      renderDeviceSetup(content);
+      renderDeviceSetup(content, server);
     }
+    content.appendChild(renderTable("server", [server]));
     DEBUG_TABLES.forEach((t, i) => content.appendChild(renderTable(t, tables[i])));
     content.appendChild(el("h2", "Global database (from the server, read-only)", "debug-db-title"));
     Object.keys(GLOBAL_DEBUG_TABLES).forEach((t, i) => {

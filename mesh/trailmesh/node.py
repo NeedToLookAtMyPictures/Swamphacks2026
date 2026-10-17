@@ -36,7 +36,7 @@ class Config:
     always_on: bool = False  # demo mode: radio always on, beacon every ~beacon_interval
     beacon_interval: float = 1.0
 
-    cooldown: float = 120.0  # after a successful exchange, wait this long before resyncing with that peer
+    cooldown: float = 10.0  # after a successful exchange, wait this long before resyncing with that peer
     retry_backoff: float = 10.0  # after a failed exchange
 
     # Session / reliability. These suit ESP-NOW; LoRa needs much longer timeouts.

@@ -9,6 +9,9 @@
 
 let sheetLocale = null;  // the global locale shown in the sheet, or null when closed
 let routeLayer = null;   // the route to the locale in the sheet
+let sheetSnapshot = null;  // JSON of the data last drawn, so refreshes skip unchanged redraws
+
+const SHEET_REFRESH_MS = 1000;
 
 function sheetEl(tag, text, className) {
   const node = document.createElement(tag);
@@ -48,6 +51,7 @@ function openLocaleSheet(locale) {
   document.getElementById("locale-sheet").hidden = false;
   document.getElementById("locale-comment-text").value = "";
   document.getElementById("locale-comment-status").textContent = "";
+  sheetSnapshot = null;
   drawGlobalLocales();  // highlight the selected locale
   map.invalidateSize();  // the map just got shorter
   map.setView([locale.latitude, locale.longitude], map.getZoom(), { animate: false });
@@ -75,6 +79,10 @@ async function loadLocaleSheet() {
   const comments = records
     .filter((r) => r.location === locale.id && r.comment)
     .sort((a, b) => b.time_created - a.time_created);  // newest first
+
+  const snapshot = JSON.stringify([me, comments, route]);
+  if (snapshot === sheetSnapshot) return;
+  sheetSnapshot = snapshot;
 
   renderLocaleInfo(locale, comments, route);
   drawRoute(route);
@@ -155,4 +163,11 @@ function initLocaleSheet() {
   const sheet = document.getElementById("locale-sheet");
   L.DomEvent.disableClickPropagation(sheet);
   L.DomEvent.disableScrollPropagation(sheet);
+
+  // Pick up comments that arrive in the background (sync, other devices)
+  setInterval(() => {
+    if (sheetLocale && document.getElementById("map").classList.contains("active") && !document.hidden) {
+      loadLocaleSheet().catch(() => {});  // try again next time
+    }
+  }, SHEET_REFRESH_MS);
 }

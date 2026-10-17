@@ -1,21 +1,29 @@
 let map = null;
+let mapLayer = null;
 
 function initMap() {
   const info = window.MAP_INFO;
+  map = L.map("leaflet-map", { maxBoundsViscosity: 0.8 });
+  showMapData(info);
+  map.setView(info.center, Math.min(info.min_zoom + 5, info.max_zoom));
+}
+
+// Fit the map to info's area and draw its tiles; called again when a new map arrives
+function showMapData(info) {
   const [minLon, minLat, maxLon, maxLat] = info.bbox;
+  map.setMinZoom(info.min_zoom);
+  map.setMaxZoom(info.max_zoom + 3);  // past the data's max zoom the vectors are scaled up
+  map.setMaxBounds([[minLat, minLon], [maxLat, maxLon]]);
 
-  map = L.map("leaflet-map", {
-    minZoom: info.min_zoom,
-    maxZoom: info.max_zoom + 3,  // past the data's max zoom the vectors are scaled up
-    maxBounds: [[minLat, minLon], [maxLat, maxLon]],
-    maxBoundsViscosity: 0.8,
-  }).setView(info.center, Math.min(info.min_zoom + 5, info.max_zoom));
-
+  if (mapLayer) map.removeLayer(mapLayer);
+  mapLayer = null;
+  document.getElementById("no-map").hidden = Boolean(info.name);
   if (!info.name) return;  // no map downloaded yet
 
-  // Vector map served locally by main.py from data/map.pmtiles
-  protomapsL.leafletLayer({
-    url: "/map.pmtiles",
+  // Vector map served locally by main.py from data/map.pmtiles. The version in the
+  // URL makes the layer read the new file instead of what it cached from the old one.
+  mapLayer = protomapsL.leafletLayer({
+    url: `/map.pmtiles?v=${encodeURIComponent(info.version || "")}`,
     flavor: "light",
     lang: "en",
     maxDataZoom: info.max_zoom,
@@ -44,5 +52,47 @@ function showTab(name) {
 document.querySelectorAll(".tab").forEach((t) =>
   t.addEventListener("click", () => showTab(t.dataset.tab)));
 
+// Enter sends a message or comment; Shift+Enter adds a new line
+["compose-content", "locale-comment-text"].forEach((id) => {
+  const box = document.getElementById(id);
+  box.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+      e.preventDefault();
+      box.form.requestSubmit();
+    }
+  });
+});
+
 loadMessages();  // Messages is the tab shown on load
 startLocationUpdates();
+
+// The global data (water sources, campsites, trails) and the offline map arrive
+// from the server during sync; redraw them when a new copy lands, without
+// reloading the page.
+const GLOBAL_CHECK_MS = 10000;
+let globalVersion;
+async function checkGlobalData() {
+  try {
+    const { version } = await fetch("/api/global/info").then((r) => r.json());
+    // Before the Map tab is first opened there's nothing drawn yet to update
+    if (map && globalVersion !== undefined && version !== globalVersion) {
+      loadGlobalLocales();
+      loadTrails();
+    }
+    globalVersion = version;
+
+    const mapInfo = await fetch("/api/map/info").then((r) => r.json());
+    if (mapInfo.version !== window.MAP_INFO.version || mapInfo.name !== window.MAP_INFO.name) {
+      const hadMap = Boolean(window.MAP_INFO.name);
+      window.MAP_INFO = mapInfo;  // initMap() uses it if the Map tab isn't open yet
+      if (map) {
+        showMapData(mapInfo);
+        if (!hadMap) map.setView(mapInfo.center, Math.min(mapInfo.min_zoom + 5, mapInfo.max_zoom));
+      }
+    }
+  } catch (err) {
+    // The local app is always reachable; just try again next time
+  }
+}
+checkGlobalData();
+setInterval(checkGlobalData, GLOBAL_CHECK_MS);
