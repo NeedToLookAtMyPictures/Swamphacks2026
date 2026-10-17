@@ -3,7 +3,8 @@
 Usage:
     python download_locales.py map    # once, while online
     python main.py                    # start the web interface (works offline)
-    python main.py --server https://example.com   # sync with another server (default: DEFAULT_SERVER_URL)
+    python main.py --server https://example.com   # sync with another server (default: DEFAULT_SERVER_URLS)
+    python main.py --server https://a.example,http://10.0.0.5:8000   # several, tried in order
     python main.py --server ""        # no server address, only look on the wifi
     python main.py --no-lan           # don't look for a server on the wifi
     python main.py --host 0.0.0.0 --https   # on a Raspberry Pi, for a phone to connect to
@@ -24,9 +25,13 @@ from database import Database
 from global_database import GlobalDatabase
 from download_locales import DATA_DIR, DEFAULT_BBOX, MAP_FILE, MAP_INFO_FILE
 
-# The demo server (the laptop running application/server). Its wifi address can
-# change when it reconnects: check with `ip -4 addr show` and update it here.
-DEFAULT_SERVER_URL = "http://10.138.191.107:8000"
+# The demo server (the laptop running application/server), tried in this order.
+# PUBLIC_SERVER_URL is its address on the internet (server/serve_public.sh prints
+# it), so it works from any network; LAN_SERVER_URL is its wifi address, which
+# can change when it reconnects: check with `ip -4 addr show` and update it here.
+PUBLIC_SERVER_URL = ""
+LAN_SERVER_URL = "http://10.138.191.107:8000"
+DEFAULT_SERVER_URLS = ",".join(u for u in (PUBLIC_SERVER_URL, LAN_SERVER_URL) if u)
 
 CERT_FILE = DATA_DIR / "cert.pem"
 KEY_FILE = DATA_DIR / "key.pem"
@@ -126,10 +131,11 @@ def main():
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=5000)
     parser.add_argument("--debug", action="store_true")
-    parser.add_argument("--server", default=os.environ.get("SERVER_URL", DEFAULT_SERVER_URL),
-                        help="server to sync with whenever it can be reached "
-                             f"(default: $SERVER_URL, else {DEFAULT_SERVER_URL}; \"\" for "
-                             "none). When it can't be reached, a server on the same wifi is used")
+    parser.add_argument("--server", default=os.environ.get("SERVER_URL", DEFAULT_SERVER_URLS),
+                        help="servers to sync with whenever one can be reached, comma-separated "
+                             f"and tried in order (default: $SERVER_URL, else {DEFAULT_SERVER_URLS}; "
+                             "\"\" for none). When none can be reached, a server on the same "
+                             "wifi is used")
     parser.add_argument("--no-lan", action="store_true",
                         help="don't look for a server on the wifi")
     parser.add_argument("--https", action="store_true",

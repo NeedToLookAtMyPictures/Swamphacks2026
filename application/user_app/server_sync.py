@@ -30,7 +30,9 @@ def call(server_url, path, payload=None, timeout=TIMEOUT):
     """GET path, or POST payload to it as JSON. Returns the JSON answer."""
     data = None if payload is None else json.dumps(payload).encode()
     request = urllib.request.Request(server_url.rstrip("/") + path, data=data,
-                                     headers={"content-type": "application/json"})
+                                     # free ngrok tunnels show browsers a warning page first
+                                     headers={"content-type": "application/json",
+                                              "ngrok-skip-browser-warning": "1"})
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             return json.load(response)
@@ -72,11 +74,17 @@ def sync_once(db, server_url):
 
 
 class ServerFinder:
-    """Which server to talk to right now: the configured one if it answers, else
-    one found on the wifi. find() returns its URL, or None when there is none."""
+    """Which server to talk to right now: the first configured one that answers,
+    else one found on the wifi. find() returns its URL, or None when there is none.
 
-    def __init__(self, url=None, lan=True):
-        self.url = url
+    urls is a list, or one string of comma-separated URLs (e.g. the public URL
+    first, then the server's wifi address).
+    """
+
+    def __init__(self, urls=None, lan=True):
+        if isinstance(urls, str):
+            urls = urls.split(",")
+        self.urls = [u.strip() for u in urls or [] if u.strip()]
         self.lan = lan
         self.lan_url = None  # last server found on the wifi, tried first next time
         self.current = None  # (url, "configured" or "wifi") after the last find()
@@ -90,10 +98,8 @@ class ServerFinder:
             return False
 
     def find(self):
-        found = None
-        if self.url and self.answers(self.url):
-            found = (self.url, "configured")
-        elif self.lan:
+        found = next(((url, "configured") for url in self.urls if self.answers(url)), None)
+        if found is None and self.lan:
             if not (self.lan_url and self.answers(self.lan_url)):
                 urls = discovery.find_servers()
                 self.lan_url = urls[0] if urls else None
@@ -103,9 +109,8 @@ class ServerFinder:
         return found[0] if found else None
 
     def describe(self):
-        if self.url and self.lan:
-            return f"{self.url}, or a server on the wifi"
-        return self.url or ("a server on the wifi" if self.lan else "nothing (offline only)")
+        choices = self.urls + (["a server on the wifi"] if self.lan else [])
+        return ", or ".join(choices) or "nothing (offline only)"
 
 
 def start(db, finder):

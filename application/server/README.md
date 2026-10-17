@@ -53,9 +53,32 @@ python main.py --server http://<server-ip>:8000
 With `--server`, that server is tried first and one on the wifi is the fallback
 (`--no-lan` turns the fallback off).
 
-To reach the server from outside your network, run it on a VPS, or expose it
-with a tunnel such as `cloudflared tunnel --url http://localhost:8000` or
-`ngrok http 8000` and pass the URL the tunnel prints.
+## A public URL anyone can reach
+
+`serve_public.sh` starts the server and a tunnel that gives it an internet
+address, so devices sync from any network (including wifi that blocks devices
+from reaching each other). The database stays on this machine. Ctrl+C stops both.
+
+**Quick, no account (cloudflared):** the URL is random and changes every run.
+
+```bash
+sudo pacman -S cloudflared      # Arch; other systems: see Cloudflare's cloudflared docs
+./serve_public.sh               # prints https://<random-words>.trycloudflare.com
+```
+
+**Same URL every run (ngrok):** sign up for a free account at ngrok.com, install
+ngrok (`yay -S ngrok` on Arch), run `ngrok config add-authtoken <token>` once,
+and claim your free static domain in the ngrok dashboard (Domains). Then:
+
+```bash
+NGROK_DOMAIN=<name>.ngrok-free.app ./serve_public.sh
+```
+
+Put that URL in `PUBLIC_SERVER_URL` in `user_app/main.py` so every user app
+tries it first by default, or start apps with `--server https://<url>`.
+
+There is no login: anyone with the URL can read every message on the database
+page and add records through the API.
 
 ## How syncing works
 

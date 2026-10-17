@@ -38,14 +38,17 @@ python main.py                       # http://127.0.0.1:5000
 python main.py --host 0.0.0.0        # reachable from other devices on the LAN
 python main.py --host 0.0.0.0 --https   # same, over HTTPS (needed for GPS, see below)
 python main.py --server http://<server>:8000   # sync with another server
+python main.py --server https://a.example,http://10.0.0.5:8000   # several, tried in order
 python main.py --server ""           # no server address, only look on the wifi
 python main.py --no-lan              # don't look for a server on the wifi
 ```
 
 A background thread looks for a server every 30 seconds and syncs whenever one
-answers: the one given with `--server` (or `SERVER_URL`), by default the demo
-server `http://10.138.191.107:8000` (`DEFAULT_SERVER_URL` in `main.py`; that
-laptop's wifi address can change, so update it there if syncing stops), or else one on the
+answers: the ones given with `--server` (or `SERVER_URL`; several can be
+comma-separated and are tried in order), by default the demo server's public URL
+(`PUBLIC_SERVER_URL` in `main.py`, see `../server/README.md`) and then its wifi
+address `http://10.138.191.107:8000` (`LAN_SERVER_URL`; it can change, so update
+it there if syncing stops), or else one on the
 same wifi, found automatically. The app keeps working offline. See
 `../server/README.md`.
 

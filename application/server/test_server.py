@@ -151,6 +151,16 @@ class DiscoveryTest(unittest.TestCase):
             self.assertIsNone(finder.find())
         self.assertIsNone(server_sync.ServerFinder(None, lan=False).find())
 
+    def test_finder_tries_several_servers_in_order(self):
+        finder = server_sync.ServerFinder("https://public.example, http://10.0.0.5:8000", lan=False)
+        self.assertEqual(finder.urls, ["https://public.example", "http://10.0.0.5:8000"])
+        with mock.patch.object(server_sync.ServerFinder, "answers", return_value=True):
+            self.assertEqual(finder.find(), "https://public.example")
+        with mock.patch.object(server_sync.ServerFinder, "answers",
+                               side_effect=lambda url: url.startswith("http://10.")):
+            self.assertEqual(finder.find(), "http://10.0.0.5:8000")
+        self.assertEqual(server_sync.ServerFinder("", lan=True).describe(), "a server on the wifi")
+
 
 if __name__ == "__main__":
     unittest.main()
