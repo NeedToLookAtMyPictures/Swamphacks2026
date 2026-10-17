@@ -2,19 +2,27 @@
 
 Every device that can reach it sends what it has and gets back what other devices
 sent. It stores the same shared tables as the user app (using its database.py)
-plus a users table that keeps names unique.
+plus a users table that keeps names unique, and the master copy of the global
+data (water sources, campsites, trails; using its global_database.py), which
+devices get during sync whenever their copy differs.
 
 Usage:
     gunicorn server:app                  # production (settings in gunicorn.conf.py)
     python server.py                     # development, http://127.0.0.1:8000
     python server.py --host 0.0.0.0      # development, reachable (and discoverable) on the wifi
+    python server.py --load-global FILE  # replace the global data (devices get it on next sync)
 
 Open the server's address in a browser to see everything in its database.
 
 API
     GET    /api/health                   is the server up, and its server_id
     POST   /api/register                 reserve a name {name, device_id?} -> {name, device_id}
-    POST   /api/sync                     {device_id, name, cursor, records} -> {cursor, records, merged}
+    POST   /api/sync                     {device_id, name, cursor, records, global_version?}
+                                         -> {cursor, records, merged, server_id, global_version,
+                                             global (only when the device's global_version differs)}
+    GET    /api/global                   all global data {version, locales, trails (GPX)}
+    GET    /api/global_locales           global locales, for the database page
+    GET    /api/global_trails            global trails without their GPX, for the database page
     GET    /api/users                    every registered name
     GET    /api/<table>?since=<time>     locales, messages, geolocations, tombstones
 """
@@ -34,11 +42,16 @@ sys.path.insert(0, str(HERE.parent / "user_app"))  # share database.py with the 
 
 import discovery  # noqa: E402
 from database import SHARED_TABLES, Database, check_name  # noqa: E402
+from global_database import GlobalDatabase, read_load_file  # noqa: E402
 
 DB_PATH = Path(os.environ.get("SERVER_DB", HERE / "data" / "server.db"))
 # The public URL is https://heuslerene.com/server, and the tunnel passes the path
 # on unchanged. Requests work with or without it, so the wifi address still works.
 URL_PREFIX = os.environ.get("URL_PREFIX", "/server").rstrip("/")
+# Loaded into an empty global database on first start: the user app's sample
+# water sources and campsites, and the Gainesville-Hawthorne trail
+GLOBAL_SEED = Path(os.environ.get("GLOBAL_SEED",
+                                  HERE.parent / "user_app" / "sample_global_locales.json"))
 
 USERS_SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -59,9 +72,12 @@ CREATE TABLE IF NOT EXISTS server_info (
 
 
 class Server:
-    def __init__(self, path=DB_PATH):
+    def __init__(self, path=DB_PATH, global_seed=GLOBAL_SEED):
         # relay: the server has no identity and never marks messages delivered
         self.db = Database(path, relay=True)
+        self.global_db = GlobalDatabase(Path(path).with_name("global.db"))
+        if self.global_db.info()["version"] is None and global_seed and global_seed.exists():
+            self.global_db.load(read_load_file(global_seed))
         with self.connect() as conn:
             conn.execute("PRAGMA journal_mode = WAL")  # readers don't block the writer
             conn.executescript(USERS_SCHEMA)
@@ -87,7 +103,7 @@ class Server:
                          (name, device_id, time.time()))
         return {"name": name, "device_id": device_id}
 
-    def sync(self, name, device_id, cursor, records):
+    def sync(self, name, device_id, cursor, records, global_version=None, wants_global=False):
         # Collect what the device is missing before merging what it sent,
         # so it doesn't get its own records straight back
         outgoing, new_cursor = self.db.changes(cursor)
@@ -98,8 +114,15 @@ class Server:
                          "VALUES (?, ?, ?)", (name, device_id, time.time()))
             conn.execute("UPDATE users SET last_sync = ? WHERE name = ? AND device_id = ?",
                          (time.time(), name, device_id))
-        return {"cursor": new_cursor, "records": outgoing, "merged": merged,
-                "server_id": self.server_id}
+        result = {"cursor": new_cursor, "records": outgoing, "merged": merged,
+                  "server_id": self.server_id}
+        if wants_global:
+            # Send the global data only when the device's copy differs from ours
+            ours = self.global_db.info()["version"]
+            result["global_version"] = ours
+            if ours is not None and global_version != ours:
+                result["global"] = self.global_db.export()
+        return result
 
     def list_users(self):
         with self.connect() as conn:
@@ -155,7 +178,8 @@ def create_app(path=DB_PATH, prefix=URL_PREFIX):
     def dashboard():
         """Everything in the server's database, for whoever runs the server."""
         return render_template("dashboard.html", server_id=server.server_id,
-                               db_path=str(server.db.path), tables=("users",) + SHARED_TABLES)
+                               db_path=str(server.db.path),
+                               tables=("users", "global_locales", "global_trails") + SHARED_TABLES)
 
     @app.get("/api/health")
     def health():
@@ -178,11 +202,27 @@ def create_app(path=DB_PATH, prefix=URL_PREFIX):
             raise ValueError(f"unknown tables: {', '.join(sorted(unknown))}")
         cursor = data.get("cursor")
         cursor = float(cursor) if cursor is not None else None
-        return jsonify(server.sync(data["name"], data["device_id"], cursor, records))
+        return jsonify(server.sync(data["name"], data["device_id"], cursor, records,
+                                   data.get("global_version"), "global_version" in data))
 
     @app.get("/api/users")
     def users():
         return jsonify(server.list_users())
+
+    @app.get("/api/global")
+    def global_data():
+        return jsonify(server.global_db.export())
+
+    @app.get("/api/global_locales")
+    def global_locales():
+        return jsonify(server.global_db.locales())
+
+    @app.get("/api/global_trails")
+    def global_trails():
+        trails = server.global_db.trails()
+        for trail in trails:
+            trail["points"] = sum(len(segment) for segment in trail.pop("segments"))
+        return jsonify(trails)
 
     @app.get("/api/<table>")
     def list_table(table):
@@ -215,7 +255,13 @@ if __name__ == "__main__":
     parser.add_argument("--host", default="127.0.0.1",
                         help="0.0.0.0 to be reachable, and discoverable, on the wifi")
     parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--load-global", type=Path, metavar="FILE",
+                        help="replace the global data with a JSON file (format: "
+                             "user_app/sample_global_locales.json) and exit")
     args = parser.parse_args()
+    if args.load_global:
+        print(app.config["SERVER"].global_db.load(read_load_file(args.load_global)))
+        sys.exit()
     # The debug reloader runs this twice; only the process that serves answers discovery
     if args.host not in ("127.0.0.1", "localhost") and os.environ.get("WERKZEUG_RUN_MAIN"):
         start_lan_discovery(args.port)

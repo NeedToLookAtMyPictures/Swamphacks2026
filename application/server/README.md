@@ -125,7 +125,8 @@ then goes back to looking. Each sync, the app:
 1. sends every record that **arrived on the device** since its last push. This
    includes records it got from other people, however old they are;
 2. gets every record that arrived on the server since the device's last pull;
-3. merges them and saves both cursors in `device_info`.
+3. merges them and saves both cursors in `device_info`;
+4. gets the server's global data, if the device's copy differs (see below).
 
 Each cursor uses the clock of the machine it describes (`last_push` the device's,
 `server_cursor` the server's), so the two clocks never need to agree. Every sync
@@ -136,6 +137,29 @@ Every server has a random `server_id`, kept in its database. The device saves th
 ID its cursors belong to, so when it syncs with a different server (say the
 internet one, then one on the wifi), it exchanges everything once instead of
 missing records the new server never got.
+
+## Global data
+
+The server keeps the master copy of the global data: the water sources,
+campsites and trails everyone sees on the map. It lives in `data/global.db`, next
+to `server.db`. On first start it's filled from
+`../user_app/sample_global_locales.json` and `../user_app/sample_trails/`
+(`GLOBAL_SEED` picks another file). Each copy has a `version`, a hash of its
+content; devices send theirs with every sync, and the server includes its data
+in the reply only when the versions differ. So a new device gets it on its first
+sync, and an update reaches every device on its next sync, over the internet or
+the wifi.
+
+To change it, write a JSON file in the same format and load it into the server
+(it can stay running):
+
+```bash
+python server.py --load-global my_global_data.json
+```
+
+The database page shows it as `global_locales` and `global_trails`.
+
+## Relaying
 
 The server is a relay: it has no user identity of its own and never marks messages
 delivered. Delivery still happens on the receiver's device, and its `delivered`
@@ -148,8 +172,11 @@ tombstone travels back through the server to everyone else.
 | GET | `/` | page showing the whole database |
 | GET | `/api/health` | is the server up, and its `server_id` |
 | POST | `/api/register` | reserve a name `{name, device_id?}` → `{name, device_id}`; 409 if taken |
-| POST | `/api/sync` | `{device_id, name, cursor, records}` → `{cursor, records, merged, server_id}` |
+| POST | `/api/sync` | `{device_id, name, cursor, records, global_version?}` → `{cursor, records, merged, server_id, global_version?, global?}`; `global` only when the device's version differs |
 | GET | `/api/users` | every registered name |
+| GET | `/api/global` | all global data `{version, locales, trails}`, trails as GPX |
+| GET | `/api/global_locales` | global locales (for the database page) |
+| GET | `/api/global_trails` | global trails without their GPX (for the database page) |
 | GET | `/api/<table>?since=<time>` | `locales`, `messages`, `geolocations`, `tombstones` |
 
 Creating an account in the user app (`POST /api/device`) needs a server: over

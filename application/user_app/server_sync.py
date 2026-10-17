@@ -4,7 +4,9 @@ While the app is running, a thread looks for a server every CHECK_EVERY seconds:
 the ones given with --server, or else one on the same wifi (see discovery.py).
 Once it reaches one, it syncs with it every SYNC_EVERY seconds: the device sends
 the records that arrived since its last push and merges what the server got
-since its last pull. If a sync fails, it goes back to looking.
+since its last pull. When the server's global data (water sources, campsites,
+trails) differs from the device's copy, it comes along and replaces it. If a
+sync fails, it goes back to looking.
 
 Only the standard library is used, so the app has no extra dependency.
 """
@@ -50,8 +52,11 @@ def register(server_url, name, device_id=None):
     return call(server_url, "/api/register", {"name": name, "device_id": device_id})
 
 
-def sync_once(db, server_url):
-    """One full exchange with the server. Raises OSError when it can't be reached."""
+def sync_once(db, server_url, global_db=None):
+    """One full exchange with the server. Raises OSError when it can't be reached.
+
+    With global_db (a GlobalDatabase), also gets the server's global data when
+    this device's copy is missing or out of date."""
     device = db.get_device()
     if device is None:
         return None  # no identity yet, nothing to sync
@@ -62,13 +67,19 @@ def sync_once(db, server_url):
         # on the wifi): this one may be missing anything, so exchange everything
         last_push = server_cursor = None
     records, push_cursor = db.changes(last_push)
-    result = call(server_url, "/api/sync", {
+    request = {
         "device_id": device["device_id"],
         "name": device["name"],
         "cursor": server_cursor,
         "records": records,
-    })
+    }
+    if global_db is not None:
+        request["global_version"] = global_db.info()["version"]
+    result = call(server_url, "/api/sync", request)
     merged = db.merge(result["records"])
+    if global_db is not None and result.get("global"):
+        loaded = global_db.load(result["global"])
+        print(f"Got the server's global data: {loaded}")
     db.update_device(last_server_sync=time.time(), last_push=push_cursor,
                      server_cursor=result["cursor"], server_id=server_id)
     return merged
@@ -117,8 +128,8 @@ class ServerFinder:
 class SyncLoop:
     """One step at a time, so the background thread stays a plain loop."""
 
-    def __init__(self, db, finder):
-        self.db, self.finder = db, finder
+    def __init__(self, db, finder, global_db=None):
+        self.db, self.finder, self.global_db = db, finder, global_db
         self.url = None  # the server we're connected to, if any
 
     def step(self):
@@ -130,7 +141,7 @@ class SyncLoop:
                 return CHECK_EVERY
             print(f"Connected to {self.url} ({self.finder.current[1]})")
         try:
-            merged = sync_once(self.db, self.url)
+            merged = sync_once(self.db, self.url, self.global_db)
         except (OSError, ServerError, ValueError) as exc:
             print(f"Server sync failed: {exc}")
             self.url = self.finder.current = None
@@ -140,9 +151,9 @@ class SyncLoop:
         return SYNC_EVERY
 
 
-def start(db, finder):
+def start(db, finder, global_db=None):
     """Sync with the server in a background thread for as long as the app runs."""
-    sync = SyncLoop(db, finder)
+    sync = SyncLoop(db, finder, global_db)
 
     def loop():
         while True:

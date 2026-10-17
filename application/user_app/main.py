@@ -118,7 +118,7 @@ def run(args):
     if (args.server or not args.no_lan) and (
             not args.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true"):
         print(f"Syncing with {finder.describe()} whenever it can be reached")
-        server_sync.start(app.config["DATABASE"], finder)
+        server_sync.start(app.config["DATABASE"], finder, app.config["GLOBAL_DATABASE"])
     ssl_context = None
     if args.https:
         ensure_certificate()

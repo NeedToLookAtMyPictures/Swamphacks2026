@@ -141,25 +141,27 @@ curl -X POST localhost:5000/api/device -H 'content-type: application/json' -d '{
 ### Global database
 
 `global_database.py` keeps a second SQLite database at `data/global.db`
-(git-ignored) for data set by the company. It is loaded once from the server
-at setup; users never change it.
+(git-ignored) for data set by the company. The server keeps the master copy
+and sends it during sync (over the internet or the wifi) whenever this device's
+copy differs, including on the first sync when the account is created; users
+never change it. The map redraws within 10 seconds when a new copy arrives.
 
 | Table | Key | Notes |
 |---|---|---|
 | `global_locales` | id | fixed places: `category` (water, campsite, ...), `name`, `latitude`, `longitude`, `description` |
 | `global_trails` | id | routes: `name`, `description`, `gpx` (the GPX document as sent) |
-| `global_info` | single row | `loaded_at`: when the data was loaded |
+| `global_info` | single row | `loaded_at`: when the data was loaded; `version`: hash of the content, equal to the server's when in sync |
 
 A global locale's `id` is what user `locales` records (reviews/comments) put in
 their `location`.
 
-The server sends `POST /api/global/load` with
-`{locales: [...], trails: [{id, name, description?, gpx}]}`, which replaces
-everything. GPX tracks (`trkseg`/`trkpt`) and routes (`rte`/`rtept`) are read;
-a trail whose GPX has no line of at least 2 points is refused. Until the server
-exists, load the example file (real Gainesville parks with made-up amenities: 24
-locales in 6 categories, plus 3 approximate trails from `sample_trails/`; in a
-file a trail can give `gpx_file` instead of the GPX text):
+The data has the form `{locales: [...], trails: [{id, name, description?, gpx}]}`,
+and loading it replaces everything. GPX tracks (`trkseg`/`trkpt`) and routes
+(`rte`/`rtept`) are read; a trail whose GPX has no line of at least 2 points is
+refused. The server starts with `sample_global_locales.json` (10 water sources
+and campsites, real Gainesville-area places with made-up amenities, plus the
+Gainesville-Hawthorne trail from `sample_trails/`; in a file a trail can give
+`gpx_file` instead of the GPX text). To test without a server, load it directly:
 
 ```bash
 python global_database.py load sample_global_locales.json

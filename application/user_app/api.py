@@ -27,11 +27,12 @@ Global data (set by the company, loaded once from the server; users can't change
     GET    /api/global/categories           each category with its count
     GET    /api/global/trails               trails with their lines parsed from GPX
     GET    /api/global/trails/<id>.gpx      a trail's original GPX file
-    GET    /api/global/info                 {loaded_at}
+    GET    /api/global/info                 {loaded_at, version}
     GET    /api/distances?from=&to=         walking distance along the global trails to global
                                             locales; from a locale id or "lat,lon" (default:
                                             this user's position), to a locale id (default: all)
-    POST   /api/global/load                 from the server: {locales, trails}; replaces everything
+    POST   /api/global/load                 {locales, trails}; replaces everything (normally the
+                                            server sends it during sync instead)
 """
 
 import sqlite3
@@ -126,8 +127,9 @@ def init_device():
         return jsonify(error="lost the server while reserving your name; try again"), 503
     db().init_device(reserved["name"], reserved["device_id"])
     # First sync right away, so the new account starts with everyone's data
+    # and the server's global data (water sources, campsites, trails)
     try:
-        server_sync.sync_once(db(), server_url)
+        server_sync.sync_once(db(), server_url, global_db())
     except (OSError, server_sync.ServerError, ValueError):
         pass  # the background sync will catch up
     return jsonify(db().get_device()), 201

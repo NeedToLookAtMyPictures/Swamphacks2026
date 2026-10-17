@@ -14,6 +14,7 @@ import server  # noqa: E402
 import discovery  # noqa: E402  (importable once server has set up the path)
 import server_sync  # noqa: E402
 from database import Database  # noqa: E402
+from global_database import GlobalDatabase  # noqa: E402
 
 
 class ServerSyncTest(unittest.TestCase):
@@ -103,6 +104,42 @@ class ServerSyncTest(unittest.TestCase):
         finder.find.return_value = None
         self.assertEqual(loop.step(), server_sync.CHECK_EVERY)
         self.assertEqual(finder.find.call_count, 2)
+
+    def test_server_starts_with_the_sample_global_data(self):
+        data = self.client.get("/api/global").json
+        self.assertEqual(len(data["locales"]), 10)
+        self.assertEqual([t["id"] for t in data["trails"]], ["trail-gainesville-hawthorne"])
+        self.assertTrue(data["trails"][0]["gpx"].lstrip().startswith("<?xml"))
+        self.assertEqual(len(self.client.get("/api/global_locales").json), 10)
+        trail = self.client.get("/api/global_trails").json[0]
+        self.assertNotIn("gpx", trail)
+        self.assertGreater(trail["points"], 2)
+
+    def test_global_data_reaches_devices_once_and_updates_follow(self):
+        globe = GlobalDatabase(Path(self.tmp.name) / "alice-global.db")
+        server_sync.sync_once(self.alice, "x", globe)
+        self.assertEqual(len(globe.locales()), 10)
+        self.assertEqual(len(globe.trails()), 1)
+        version = globe.info()["version"]
+        self.assertEqual(version, self.client.get("/api/global").json["version"])
+        # Up to date: the server doesn't send it again
+        with mock.patch.object(GlobalDatabase, "load") as load:
+            server_sync.sync_once(self.alice, "x", globe)
+        load.assert_not_called()
+        # The server gets new global data; the device follows on its next sync
+        server_app = self.client.application.config["SERVER"]
+        spring = {"id": "s1", "category": "water", "name": "Spring", "latitude": 29.6,
+                  "longitude": -82.3}
+        server_app.global_db.load({"locales": [spring], "trails": []})
+        server_sync.sync_once(self.alice, "x", globe)
+        self.assertEqual([l["id"] for l in globe.locales()], ["s1"])
+        self.assertEqual(globe.trails(), [])
+        self.assertNotEqual(globe.info()["version"], version)
+
+    def test_devices_that_dont_ask_get_no_global_data(self):
+        response = self.client.post("/api/sync", json={"name": "alice", "device_id": "d-alice"})
+        self.assertNotIn("global", response.json)
+        self.assertNotIn("global_version", response.json)
 
     def test_new_server_gets_a_full_exchange(self):
         # alice synced with one server; her cursors mean nothing to another one

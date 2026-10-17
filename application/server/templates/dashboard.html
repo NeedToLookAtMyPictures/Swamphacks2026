@@ -38,7 +38,7 @@
     const TABLES = {{ tables | tojson }};
     const API = {{ (request.script_root ~ '/api') | tojson }};  // includes /server when opened through it
     const TIME_FIELDS = new Set(["time_created", "time_received", "last_sync"]);
-    const LONG_FIELDS = new Set(["content", "comment"]);
+    const LONG_FIELDS = new Set(["content", "comment", "description"]);
 
     function el(tag, text, className) {
       const node = document.createElement(tag);

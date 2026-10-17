@@ -39,7 +39,7 @@ class FakeServer:
         """Use this as app's server for the rest of the test."""
         app.config["SERVER"] = self
         for name, fake in (("register", self.register),
-                           ("sync_once", lambda _db, _url: None)):
+                           ("sync_once", lambda *_: None)):
             patcher = mock.patch.object(server_sync, name, fake)
             patcher.start()
             test.addCleanup(patcher.stop)

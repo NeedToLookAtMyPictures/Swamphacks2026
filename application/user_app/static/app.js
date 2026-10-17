@@ -46,3 +46,23 @@ document.querySelectorAll(".tab").forEach((t) =>
 
 loadMessages();  // Messages is the tab shown on load
 startLocationUpdates();
+
+// The global data (water sources, campsites, trails) arrives from the server
+// during sync; redraw it when a new copy lands, without reloading the page.
+const GLOBAL_CHECK_MS = 10000;
+let globalVersion;
+async function checkGlobalData() {
+  try {
+    const { version } = await fetch("/api/global/info").then((r) => r.json());
+    // Before the Map tab is first opened there's nothing drawn yet to update
+    if (map && globalVersion !== undefined && version !== globalVersion) {
+      loadGlobalLocales();
+      loadTrails();
+    }
+    globalVersion = version;
+  } catch (err) {
+    // The local app is always reachable; just try again next time
+  }
+}
+checkGlobalData();
+setInterval(checkGlobalData, GLOBAL_CHECK_MS);
