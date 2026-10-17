@@ -92,10 +92,24 @@ function drawLastKnownPins() {
       label.appendChild(settingsEl("strong", personLabel(g.user)));
       label.appendChild(settingsEl("div", `Last seen ${timeAgo(g.time_created)}`));
       label.appendChild(settingsEl("div", new Date(g.time_created * 1000).toLocaleString()));
-      return L.marker([g.latitude, g.longitude], { title: g.user })
+      const marker = L.marker([g.latitude, g.longitude], { title: g.user })
         // the default icon's tooltip anchor sits right of the pin; center it just above the pin
-        .bindTooltip(label, { permanent: true, direction: "top", offset: [-16, -14], className: "pin-label" });
+        .bindTooltip(label, { permanent: true, interactive: true, direction: "top",
+                              offset: [-16, -14], className: "pin-label" });
+      // Hovering the pin or its label brings both above the others
+      marker.on("mouseover", () => raisePin(marker));
+      marker.on("add", () => marker.getTooltip().getElement()
+        .addEventListener("mouseenter", () => raisePin(marker)));
+      return marker;
     })).addTo(map);
+}
+
+let raisedPinZ = 0;
+
+function raisePin(marker) {
+  raisedPinZ++;
+  marker.setZIndexOffset(1000 * raisedPinZ);  // marker z-index is its latitude plus this offset
+  marker.getTooltip().getElement().style.zIndex = raisedPinZ;
 }
 
 function initMapSettings() {
