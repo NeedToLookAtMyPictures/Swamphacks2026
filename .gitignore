@@ -1,3 +1,6 @@
+<<<<<<< HEAD
+*.pyc
+=======
 ### Python ###
 __pycache__/
 *.py[cod]
@@ -72,3 +75,4 @@ arduino_secrets.h
 *.log
 *.bak
 *.orig
+>>>>>>> 6dd4e1f0b6cfd7c3b722dbfb7c75e925faf737dd

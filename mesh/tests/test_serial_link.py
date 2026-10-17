@@ -16,7 +16,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from trailmesh import Config, Node, Record, RecordStore  # noqa: E402
 from trailmesh.espnow_serial import (  # noqa: E402
-    BROADCAST, CMD_GET_INFO, CMD_RADIO, CMD_SEND, CMD_SET_PARTNER, EVT_INFO, EVT_RECV, SlipDecoder, slip_encode,
+    BROADCAST, CMD_GET_INFO, CMD_RADIO, CMD_SEND, CMD_SET_PARTNER, EVT_INFO, EVT_RECV, STATUS, SlipDecoder,
+    slip_encode,
 )
 from trailmesh.wire import MAX_FRAME  # noqa: E402
 
