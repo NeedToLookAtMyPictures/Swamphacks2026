@@ -1,0 +1,78 @@
+Web Application:
+    Distress Setting (No warrenty)
+    Messaging
+    Last known location
+    Pin reviews
+        Water
+        Camp sites
+
+
+User is given an ID from the server. 
+
+
+The application UI will have three tabs:
+    Map
+        Pins
+        User location
+    Messaging (insecure)
+    Board
+    Emergency
+        Last known location of user
+
+The server will store:
+    Users
+    All data
+    Comments at all sites
+
+
+When User contacts server, it will sync and the sync will be saved
+
+
+--------------------------------------------------------------------------------------------------------------
+
+Startup:
+    User gets name from server with handshake
+
+
+Normal User use:
+    User has 
+        - All current data
+        - Last server contact
+        - Current location
+
+    Update with user-user:
+        User gives information
+        User information updates
+
+    Update with user-server:
+        User gives information
+        User gets new information
+        User updates last server contact
+
+
+Normal Server Use:
+
+
+
+- Time
+
+
+
+
+
+
+
+
+
+--------------
+There are 3 tables
+
+Locales:  {time_created: double, time_recieved: double, location: str, name: str, sender: str, comment: str}
+Geolocations: {time_created: double, time_recieved: double, user: str, latitude: double, longitude: double }
+Messages: {time_created: double, time_recieved: double, sender: str, reciever: str, content: str, is_dead: bool}
+
+if message_age > 31 days, is_dead = True
+if message reaches intended user, is_dead = True
+
+When sever sees messages, if is_dead is true, it tells anyone that hooks up message is dead. If message is dead, and two people have message
+then if one is dead both is dead. If the other person doesnt have dead message, they dont save it.
