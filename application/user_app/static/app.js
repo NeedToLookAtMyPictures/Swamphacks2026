@@ -45,6 +45,7 @@ function showTab(name) {
     }
     map.invalidateSize();  // Leaflet needs this after the container becomes visible
   }
+  if (name === "explore") loadTrails();
   if (name === "messages") loadMessages();
   if (name === "debug") loadDebug();
 }
@@ -74,10 +75,10 @@ let globalVersion;
 async function checkGlobalData() {
   try {
     const { version } = await fetch("/api/global/info").then((r) => r.json());
-    // Before the Map tab is first opened there's nothing drawn yet to update
-    if (map && globalVersion !== undefined && version !== globalVersion) {
-      loadGlobalLocales();
-      loadTrails();
+    // Before the Map tab is first opened there are no locales drawn yet to update
+    if (globalVersion !== undefined && version !== globalVersion) {
+      if (map) loadGlobalLocales();
+      loadTrails();  // also refreshes the Explore list
     }
     globalVersion = version;
 

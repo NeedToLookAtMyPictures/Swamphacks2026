@@ -69,6 +69,44 @@ main {
   border-radius: 4px;
 }
 
+/* Explore tab: one card per trail; picking one shows it on the map */
+#explore {
+  overflow-y: auto;
+  padding: 16px;
+}
+
+.explore-title { margin: 0 0 4px; font-size: 20px; color: #1f3b2d; }
+.explore-intro { margin: 0 0 14px; color: #555; }
+
+#explore-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.explore-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 14px 16px;
+  border: 2px solid #d5ddd8;
+  border-left: 6px solid #ff6f00;
+  border-radius: 8px;
+  background: #fff;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.explore-card:hover:not(:disabled) { background: #e8efe9; }
+.explore-card.selected { border-color: #2e5a43; border-left-color: #ff6f00; background: #f0f6f2; }
+.explore-card:disabled { border-left-color: #bbb; color: #888; cursor: default; }
+.explore-card-name { font-size: 17px; font-weight: 600; }
+.explore-card-detail { font-size: 14px; color: #666; }
+.explore-card-action { margin-top: 6px; font-size: 13px; font-weight: 600; color: #2e5a43; }
+.explore-card:disabled .explore-card-action { color: #999; }
+
 /* Debug tab */
 #debug {
   overflow: auto;
@@ -363,7 +401,7 @@ main {
 
 .settings-back:hover { background: #e8efe9; }
 
-#last-known-search, #locales-search, #trails-search {
+#last-known-search, #locales-search {
   width: 100%;
   padding: 6px 8px;
   font: inherit;
@@ -371,7 +409,7 @@ main {
   border-radius: 4px;
 }
 
-#last-known-list, #locales-list, #trails-list {
+#last-known-list, #locales-list {
   max-height: 240px;
   overflow-y: auto;
   margin-top: 6px;

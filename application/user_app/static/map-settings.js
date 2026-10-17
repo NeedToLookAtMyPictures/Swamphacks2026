@@ -22,11 +22,6 @@ function showSettingsView(name) {
     search.value = "";
     loadLastKnown().then(() => search.focus());
   }
-  if (name === "trails") {
-    const search = document.getElementById("trails-search");
-    search.value = "";
-    loadTrails().then(() => search.focus());
-  }
   if (name === "locales") {
     const search = document.getElementById("locales-search");
     search.value = "";
