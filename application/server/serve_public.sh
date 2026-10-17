@@ -25,15 +25,28 @@ elif ! command -v cloudflared >/dev/null; then
   exit 1
 fi
 
+if curl -s -o /dev/null "http://localhost:${PORT}/"; then
+  echo "Something is already running on port ${PORT} (an older server?)."
+  echo "Stop it first, e.g. pkill -f 'gunicorn server:app', then run this again."
+  exit 1
+fi
+
 gunicorn server:app &
 SERVER_PID=$!
 trap 'kill "$SERVER_PID" 2>/dev/null' EXIT
 
 # Wait for the server before opening the tunnel
 for _ in $(seq 50); do
+  kill -0 "$SERVER_PID" 2>/dev/null || break  # gunicorn gave up (port taken?)
   curl -sf "http://localhost:${PORT}/api/health" >/dev/null && break
   sleep 0.2
 done
+if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+  echo
+  echo "The server didn't start. If it says 'Address already in use', another server"
+  echo "is already running on port ${PORT}: stop it (pkill -f 'gunicorn server:app') and try again."
+  exit 1
+fi
 
 if [[ -n "${NGROK_DOMAIN:-}" ]]; then
   echo
