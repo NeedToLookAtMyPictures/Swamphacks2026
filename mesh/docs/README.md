@@ -90,7 +90,8 @@ interleave. The diagram shows one possible order.
 - **session**: one exchange with one peer, from HELLO to DONE or failure.
 - **last_server_sync**: when this device last synced with the server (the app's `device_info`).
 - **cutoff**: `min(my last_server_sync, peer's last_server_sync)`. Only records
-  created after it are exchanged.
+  created or received after it are exchanged.
+- **relay**: for a given message, any device that is neither its sender nor its receiver.
 
 ## Checklist: confirm these match your mental model
 
@@ -104,15 +105,14 @@ Each item links to the doc that explains it.
    `[HANDSHAKE_COMMAND][DEVICE_ID]`. Here every frame, the handshake included,
    is `[DEVICE_ID][TYPE]...`, so the firmware can filter all frames the same
    way. ([wire.md](wire.md))
-4. **The cutoff uses the record's creation time**, mirroring the app's
-   `GET /api/sync?since=`. Open TODO: should it use when the server last saw
-   the record instead? ([store.md](store.md))
+4. **The cutoff is the older of the two last server syncs**, and a record is
+   exchanged if it was created **or received** after it, so data picked up
+   offline still spreads. ([store.md](store.md))
 5. **The app's database is the only store.** The mesh moves the app's rows and
-   leaves every rule to the app's `merge()`/`export()`/`purge()`.
-   ([store.md](store.md))
-6. **Tombstoned messages are kept dead, not deleted**, until the 31-day purge,
-   because that's what the app does. The mesh stops relaying them. Open TODO:
-   should relays delete them? ([store.md](store.md))
+   leaves the rules to the app's `merge()`/`export()`/`purge()`, except the two
+   mesh rules in 4 and 6. ([store.md](store.md))
+6. **Relays delete tombstoned messages** but keep relaying the tombstone. Only
+   the sender and receiver keep the message, marked dead. ([store.md](store.md))
 7. **Only the lower device id starts a session**, and a device in a session
    ignores everyone else. ([node.md](node.md))
 8. **The exchange is symmetric.** Both sides send INV, WANT and DATA. There is

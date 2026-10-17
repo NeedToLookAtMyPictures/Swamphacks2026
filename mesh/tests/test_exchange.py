@@ -58,30 +58,36 @@ class ExchangeTests(unittest.TestCase):
         self.assertEqual(a.store.db.get_location("bob")["latitude"], 29.65)
 
     def test_delivered_tombstone_kills_message_and_reaches_sender(self):
-        """A writes to carol; B relays; C's 'delivered' tombstone spreads back through B to A."""
+        """A writes to carol; relay B carries it; C's 'delivered' tombstone spreads back through B
+        to A and on to D. Relays delete the message; only sender and receiver keep it."""
         m = SimMedium(self.clock)
         reach = {frozenset((b"alice", b"bob"))}
         m.in_range = lambda x, y: frozenset((x, y)) in reach
-        a, b, c = self.node(m, "alice", 1, **FAST), self.node(m, "bob", 2, **FAST), self.node(m, "carol", 3, **FAST)
+        a, b, c, d = (self.node(m, n, i, **FAST) for i, n in enumerate(("alice", "bob", "carol", "dave"), 1))
+        nodes = [a, b, c, d]
         msg = a.store.db.add_message("carol", "meet at the shelter")
         key = (msg["origin_id"], msg["seq"])
-        run([a, b, c], self.clock, 20, until=lambda: self.message(b, *key) is not None)
+        tombstoned = lambda n: any(t["target_seq"] == key[1] for t in n.store.db.list("tombstones"))  # noqa: E731
+        run(nodes, self.clock, 20, until=lambda: self.message(b, *key) is not None)
         self.assertIsNotNone(self.message(b, *key), "B relays the message")
 
         reach.clear()
         reach.add(frozenset((b"bob", b"carol")))  # B walks on and meets C
-        run([a, b, c], self.clock, 60, until=lambda: self.message(b, *key)["is_dead"])
+        run(nodes, self.clock, 60, until=lambda: tombstoned(b) and self.message(b, *key) is None)
         self.assertEqual(self.message(c, *key)["content"], "meet at the shelter")
-        self.assertTrue(self.message(c, *key)["is_dead"], "C tombstoned its own message")
-        self.assertTrue(self.message(b, *key)["is_dead"], "C's tombstone reached B")
+        self.assertTrue(self.message(c, *key)["is_dead"], "C (receiver) keeps its message, marked dead")
+        self.assertTrue(tombstoned(b), "C's tombstone reached B")
+        self.assertIsNone(self.message(b, *key), "B (relay) deleted the tombstoned message")
 
         reach.clear()
-        reach.add(frozenset((b"alice", b"bob")))  # B meets A again
-        run([a, b, c], self.clock, 60, until=lambda: bool(self.delivered))
+        reach.update({frozenset((b"alice", b"bob")), frozenset((b"bob", b"dave"))})  # B meets A, then D
+        run(nodes, self.clock, 60, until=lambda: bool(self.delivered) and tombstoned(d))
         self.assertEqual(self.delivered, [("alice", *key)])
-        self.assertTrue(self.message(a, *key)["is_dead"])
+        self.assertTrue(self.message(a, *key)["is_dead"], "A (sender) keeps its message, marked dead")
+        self.assertTrue(tombstoned(d), "B keeps relaying the tombstone after deleting the message")
+        self.assertIsNone(self.message(d, *key))
         dead = record_id(Kind.MESSAGE, *key)
-        for n in (a, b, c):
+        for n in nodes:
             self.assertNotIn(dead, [rid for rid, _, _ in n.store.inventory(0)], "dead messages aren't relayed")
 
     def test_server_tombstone_kills_message_without_delivery(self):
@@ -152,19 +158,31 @@ class ExchangeTests(unittest.TestCase):
         run([a, b, c], self.clock, 10, until=lambda: has(c))
         self.assertTrue(has(c))
 
-    def test_cutoff_skips_records_created_before_last_server_sync(self):
+    def test_cutoff_counts_records_created_or_received_after_older_sync(self):
+        """A last synced 2 days ago, B 1 day ago, so cutoff = A's sync. Each side sends
+        what it created or received after that; anything older both got from the server."""
         m = SimMedium(self.clock)
         a, b = self.node(m, "alice", 1, **FAST), self.node(m, "bob", 2, **FAST)
         now = time.time()
-        row = dict(origin_id="0000000a", location="spring-1203", name="Mile 1203 spring", sender="dave")
-        a.store.db.merge({"locales": [dict(row, seq=1, time_created=now - 500, comment="old"),
-                                      dict(row, seq=2, time_created=now - 50, comment="new")]})
-        a.store.last_server_sync = now - 10
-        b.store.last_server_sync = now - 100  # cutoff = now - 100
-        run([a, b], self.clock, 10, until=lambda: b.store.db.list("locales"))
+
+        def merge_at(n, t, comment, seq, created):
+            row = dict(origin_id="0000000a", seq=seq, time_created=created, location="spring-1203",
+                       name="Mile 1203 spring", sender="erin", comment=comment)
+            with mock.patch.object(database, "time", types.SimpleNamespace(time=lambda: t)):
+                n.store.db.merge({"locales": [row]})
+
+        merge_at(a, now - 3 * DAY, "old, both have it", 1, now - 3 * DAY)
+        merge_at(a, now - 1.5 * DAY, "A got it offline", 2, now - 1.5 * DAY)
+        merge_at(b, now - 1 * DAY, "B got it from the server", 3, now - 5 * DAY)  # created long before
+        a.store.last_server_sync = now - 2 * DAY
+        b.store.last_server_sync = now - 1 * DAY
+        comments = lambda n: sorted(r["comment"] for r in n.store.db.list("locales"))  # noqa: E731
+        run([a, b], self.clock, 10, until=lambda: len(comments(a)) == 3 and len(comments(b)) == 2)
         run([a, b], self.clock, 2)
-        self.assertEqual([r["comment"] for r in b.store.db.list("locales")], ["new"],
-                         "both devices got the older one from the server")
+        self.assertEqual(comments(b), ["A got it offline", "B got it from the server"],
+                         "the record from before the cutoff isn't sent")
+        self.assertEqual(comments(a), ["A got it offline", "B got it from the server", "old, both have it"],
+                         "created 5 days ago but received after A's sync, so A still gets it")
 
     def test_newest_position_wins(self):
         m = SimMedium(self.clock)

@@ -5,10 +5,18 @@ the data: message expiry (31 days), tombstones killing messages, a receiver
 tombstoning ("delivered") a message addressed to it, newest position per user.
 AppStore only translates between its rows and mesh Records, using the app's
 public API: export() to read what the device shares, merge() to apply what a
-peer sent, get_device()/update_device() for identity and last server sync.
+peer sent, list() for when this device received each row, and
+get_device()/update_device() for identity and last server sync.
+
+Two mesh rules go beyond the app's API:
+  * Relays delete tombstoned messages (the app only marks them dead). The app
+    has no delete call, so that one statement runs directly on its database file.
+  * The sync cutoff also counts when a row was *received*, not just created.
 """
 from __future__ import annotations
 
+import contextlib
+import sqlite3
 import zlib
 
 from .records import ID_LEN, TABLE, Kind, Record, record_id
@@ -24,6 +32,7 @@ class AppStore:
         self.device_id: str = device["device_id"]
         self._index: dict[bytes, Record] | None = None  # id -> record, for has()/get()
         self._dead_targets: set[bytes] = set()  # ids of messages killed by a tombstone
+        self._received: dict[bytes, float] = {}  # id -> when this device received the row
 
     @property
     def mesh_id(self) -> int:
@@ -50,13 +59,40 @@ class AppStore:
         data = self.db.export(since)
         return [Record.from_row(table, row) for table in TABLE.values() for row in data.get(table, [])]
 
+    def _delete_tombstoned_relays(self) -> None:
+        """A relay deletes every message a tombstone has killed.
+
+        Only the sender and receiver keep a tombstoned message (the app marks it
+        dead). Everyone else deletes it; the tombstone itself stays and is still
+        relayed. The deleted message can't come back: has() still recognizes it by
+        the tombstone, and the app's merge() refuses a tombstoned message that
+        isn't ours. Messages marked dead without a tombstone are left alone, since
+        nothing would stop a peer's live copy from bringing them back.
+        """
+        me = self.db.get_device()["name"]
+        with contextlib.closing(sqlite3.connect(self.db.path, timeout=10)) as conn, conn:
+            # sender and receiver are COLLATE NOCASE columns, as in the app's purge()
+            conn.execute(
+                "DELETE FROM messages WHERE sender IS NOT ? AND receiver IS NOT ? AND EXISTS ("
+                "  SELECT 1 FROM tombstones t"
+                "  WHERE t.target_origin_id = messages.origin_id AND t.target_seq = messages.seq)",
+                (me, me),
+            )
+
     def _refresh(self) -> dict[bytes, Record]:
+        self._delete_tombstoned_relays()
         recs = self._shared()
         self._index = {r.id: r for r in recs}
         self._dead_targets = {
             record_id(Kind.MESSAGE, r.data["target_origin_id"], int(r.data["target_seq"]))
             for r in recs
             if r.kind is Kind.TOMBSTONE
+        }
+        # export() drops time_received, so read it from the full rows
+        self._received = {
+            Record.from_row(table, row).id: row["time_received"]
+            for table in TABLE.values()
+            for row in self.db.list(table)
         }
         return self._index
 
@@ -65,25 +101,26 @@ class AppStore:
 
     @staticmethod
     def _relayable(rec: Record) -> bool:
-        # The app marks a tombstoned message dead (is_dead = 1) instead of deleting it,
-        # and keeps sharing it marked dead until the 31-day purge. Over the mesh a dead
-        # copy is useless: a peer that has the message already got the tombstone, and a
-        # peer that doesn't won't store a dead message that isn't its own. So the mesh
-        # stops relaying dead messages, while the app's own rows stay as the app keeps them.
-        # TODO: should relays delete the tombstoned messages they have stored
+        # What's left marked dead is the sender's or receiver's own copy, which they keep.
+        # Nobody else needs it: a peer that holds the message already got the tombstone,
+        # and a peer that doesn't won't store a dead message that isn't its own.
         return not (rec.kind is Kind.MESSAGE and rec.data["is_dead"])
 
     def inventory(self, cutoff: float) -> list[tuple[bytes, Kind, int]]:
         """(id, kind, created) of every record to offer a peer.
 
-        Mirrors the app's GET /api/sync?since=<cutoff>: only records *created*
-        after the cutoff are offered, where cutoff = min of both devices' last
-        server sync (both got everything older from the server).
+        cutoff = min of both devices' last server sync. Both got everything from
+        the server up to then, so a record is offered only if this device created
+        or received it after the cutoff. Counting *received* means data picked up
+        while offline (from other peers, or written before the cutoff by a device
+        that was offline) still moves on through the mesh.
         """
-        # TODO: should peer-to-peer sync be based on when this record was last seen by the server or when it was created
-        self._refresh()
-        recs = self._shared(cutoff or None)
-        return [(r.id, r.kind, min(int(r.created), 2**32 - 1)) for r in recs if self._relayable(r)]
+        index = self._refresh()
+        return [
+            (rid, r.kind, min(int(r.created), 2**32 - 1))
+            for rid, r in index.items()
+            if self._relayable(r) and max(r.created, self._received.get(rid, r.created)) > cutoff
+        ]
 
     def has(self, rid: bytes) -> bool:
         """True if we hold the record, or it's a message a tombstone has killed."""

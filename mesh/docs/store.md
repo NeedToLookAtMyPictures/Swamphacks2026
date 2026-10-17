@@ -2,8 +2,10 @@
 
 **Purpose.** `AppStore` connects the mesh to the app's database
 (`application/user_app/database.py`). There is **one** store per device, the
-app's. The mesh doesn't keep a copy of the data and doesn't re-implement any of
-its rules. `AppStore` only translates between app rows and mesh `Record`s.
+app's. The mesh doesn't keep a copy of the data and doesn't re-implement the
+app's rules. `AppStore` translates between app rows and mesh `Record`s, and
+adds two mesh rules of its own: relays delete tombstoned messages, and the sync
+cutoff counts when a row was received (both below).
 
 ```python
 from database import Database          # the app's module
@@ -22,7 +24,7 @@ All through the app's public `Database` API:
 |---|---|
 | Messages expire 31 days after `time_created`; the sender and receiver keep theirs, marked dead | `purge()` |
 | Expired messages are never shared | `export()` |
-| A tombstone marks its target message dead (`is_dead = 1`) | `merge()` |
+| A tombstone marks its target message dead (`is_dead = 1`); the mesh then deletes it on relays (below) | `merge()` |
 | A message addressed to this device creates a `delivered` tombstone | `merge()` |
 | Broadcast messages (`receiver = "*"`) are never delivered or tombstoned | `merge()` |
 | A dead message is only taken if it's ours | `merge()` |
@@ -33,7 +35,7 @@ All through the app's public `Database` API:
 
 | Method | Uses | Does |
 |---|---|---|
-| `inventory(cutoff)` | `export(since=cutoff)` | The manifest: `(id, kind, created)` of every record to offer, minus dead messages |
+| `inventory(cutoff)` | `export()`, `list()` | The manifest: `(id, kind, created)` of every record created or received after the cutoff, minus dead messages |
 | `has(id)` | `export()` | True if we hold the record **or** a tombstone we hold has killed it |
 | `get(id)` | `export()` | The record, to send it |
 | `put(record)` | `merge()` | Hand a peer's record to the app; True if anything changed |
@@ -51,36 +53,49 @@ positions once a minute, comments).
 
 ```
 cutoff = min(my last_server_sync, peer's last_server_sync)
-offer only records with time_created > cutoff
+offer a record if this device created OR received it after the cutoff
 ```
 
-This mirrors the app's `GET /api/sync?since=<cutoff>`. Both devices synced
-with the server after the cutoff, so both are assumed to already have
-everything older.
+Example: A last synced with the server 2 days ago and B 1 day ago, so the
+cutoff is 2 days ago. Both got everything older from the server. After that:
+- B gets everything A created or received in the last 2 days, including what A
+  picked up while offline, from other peers or written by hand.
+- A gets everything B created or received in that time, including what B
+  downloaded from the server 1 day ago. That data may have been *created* long
+  before; it's offered because B *received* it after the cutoff.
 
-**Open question (TODO in `inventory`):** should peer-to-peer sync be based on
-when a record was last seen by the server, or when it was created? Comparing
-creation time means a record **written offline before the cutoff but uploaded
-after it** is never offered between peers. One device has it and the other
-never gets it over the mesh, only from the server. Filtering on when the server
-received the record would fix that, but the app and server don't record that time.
+"Received" is the app's local `time_received` column, set whenever a row is
+stored (from a peer, the server, or written on this device). `export()`
+doesn't include it, so `AppStore` reads it with `list()`.
 
-## Relaying tombstoned messages
+**This differs from the app's own `GET /api/sync?since=`**, which filters on
+`time_created` only. The mesh doesn't use that endpoint, but anything else that
+does (such as device-to-server sync) still has the old behavior.
 
-The app marks a tombstoned message dead and keeps the row until the 31-day
-purge (on the sender's and receiver's devices, for good). `export()` still
-includes it with `is_dead = 1`. **The mesh doesn't offer dead messages:**
-- a peer that holds the message already received the tombstone that killed it;
-- a peer that doesn't hold it won't store a dead message that isn't its own
-  (the app's `merge()` refuses it).
+## Relays delete tombstoned messages
 
-So sending it would only waste airtime. Dead messages are also left out of the
-digest, so a device holding a dead copy and one that never had it still match.
-The app's rows are untouched; only what goes on the air changes.
+A **relay** is a device that is neither the sender nor the receiver of a
+message. When a tombstone reaches a relay, the relay **deletes the message**
+but keeps the tombstone and keeps passing it on to every peer it meets, so the
+kill keeps spreading. Only the sender and the receiver keep the message, marked
+dead.
 
-**Open question (TODO in `_relayable`):** should relays delete the tombstoned
-messages they have stored? Today they keep them, dead, until day 31, because
-that's what the app does.
+The app only marks tombstoned messages dead and has no call to delete one, so
+`AppStore` deletes them itself with one SQL statement on the app's database
+file (`_delete_tombstoned_relays`, run every time `AppStore` re-reads the
+database). It spares the sender and receiver the same way the app's `purge()`
+does. The app's code is unchanged.
+
+A deleted message can't come back:
+- `has()` still recognizes its id through the tombstone, so it's never requested;
+- the app's `merge()` refuses a tombstoned message that isn't ours.
+
+Messages marked dead **without** a tombstone are left alone, since nothing would
+stop a peer's live copy from bringing them back.
+
+The sender's and receiver's dead copies aren't offered either: a peer that holds
+the message already got the tombstone, and a peer that doesn't won't store a
+dead message that isn't its own. Dead messages are also left out of the digest.
 
 ## Device id on the air
 
@@ -91,8 +106,14 @@ hash to the same value.
 
 ## Known gaps
 
-- **`digest()` and `inventory()` read the whole database** through `export()`.
-  That's fine for thousands of rows, not millions.
+- **`digest()` and `inventory()` read the whole database** through `export()`
+  and `list()`. That's fine for thousands of rows, not millions.
+- **Relay deletion depends on the app's schema.** The delete statement names the
+  app's `messages` and `tombstones` columns. If those change, or the app adds
+  its own delete call, `_delete_tombstoned_relays` must follow.
+- **A tombstone that arrives through the server** (the app's `POST /api/sync`)
+  only marks the message dead until the mesh next reads the database (the next
+  beacon or session), which then deletes it.
 - **Stale positions are requested.** A peer's older position for a user has a
   new id, so we request it, and then the app's `merge()` discards it because
   ours is newer. It costs a little airtime.

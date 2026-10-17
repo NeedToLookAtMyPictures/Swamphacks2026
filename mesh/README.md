@@ -52,8 +52,9 @@ the window until the exchange ends.
 
 **Exchange** (both sides do the same thing):
 1. cutoff = min(both last server syncs)
-2. INV: `(id, kind, created)` of every record created after the cutoff,
-   except dead messages
+2. INV: `(id, kind, created)` of every record this device created **or
+   received** after the cutoff, except dead messages. So data picked up while
+   offline still moves on.
 3. WANT: ids from the peer's INV that I don't have (and no tombstone of mine has killed)
 4. DATA: wanted records, split into chunks so every frame is ≤ 250 bytes
    (any record size, e.g. 1 MB = 4 425 frames), highest priority first
@@ -66,10 +67,11 @@ from the peer for `idle_timeout` seconds, the session ends. Records that fully
 arrived are kept, partial ones are dropped, and the next encounter picks up the rest.
 
 **Tombstones.** When a message reaches its receiver, the receiver's app
-creates a `delivered` tombstone. It spreads like any record, marks the message
-dead on every device it reaches, and tells the sender the message was delivered
-(`on_delivered`). Broadcast messages (`*`) are never tombstoned. Messages and
-tombstones expire after 31 days. All of these rules are the app's; see
+creates a `delivered` tombstone. It spreads like any record. Relays (anyone but
+the sender and receiver) delete the message and keep passing the tombstone on.
+The sender and receiver keep the message, marked dead, and the sender learns
+it was delivered (`on_delivered`). Broadcast messages (`*`) are never
+tombstoned. Messages and tombstones expire after 31 days. See
 [docs/store.md](docs/store.md).
 
 ## Changes from the original design in issue #2
@@ -79,11 +81,10 @@ tombstones expire after 31 days. All of these rules are the app's; see
   shared, time-synced window are enough. Slot scheduling may come back for LoRa.
 - **Digest in beacons.** Peers holding identical sets skip the exchange entirely.
 - **The data model is the app's.** Records are rows of the app's shared tables,
-  and the app's `merge()`, `export()` and `purge()` decide what's kept, so the
-  mesh and the app can't disagree.
-- **Open TODOs for the team** (in `store.py`): should peer-to-peer sync be
-  based on when a record was last seen by the server, or when it was created?
-  And should relays delete the tombstoned messages they have stored?
+  and the app's `merge()`, `export()` and `purge()` decide what's kept. On top
+  of that, the mesh deletes tombstoned messages on relays and counts *received*
+  time in the cutoff. The app's own `/api/sync?since=` still counts only
+  creation time.
 
 ## Toward LoRa
 
