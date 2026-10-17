@@ -44,6 +44,17 @@ function showTab(name) {
 document.querySelectorAll(".tab").forEach((t) =>
   t.addEventListener("click", () => showTab(t.dataset.tab)));
 
+// Enter sends a message or comment; Shift+Enter adds a new line
+["compose-content", "locale-comment-text"].forEach((id) => {
+  const box = document.getElementById(id);
+  box.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+      e.preventDefault();
+      box.form.requestSubmit();
+    }
+  });
+});
+
 loadMessages();  // Messages is the tab shown on load
 startLocationUpdates();
 

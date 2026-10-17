@@ -56,11 +56,13 @@ function renderMessage(m) {
 
 let lastMessages = [];
 let lastPeople = [];
+let lastSnapshot = null;  // JSON of the data last drawn, so refreshes skip unchanged redraws
 
 async function loadMessages() {
   const list = document.getElementById("message-list");
   const deviceRes = await fetch("/api/device");
   if (!deviceRes.ok) {
+    lastSnapshot = null;
     document.getElementById("chat-list").replaceChildren();
     document.getElementById("chat-title").textContent = "";
     list.replaceChildren(msgEl("p", "Set up this device first (Debug tab).", "message-note"));
@@ -73,6 +75,12 @@ async function loadMessages() {
     fetch("/api/contacts").then((r) => r.json()),
     fetch("/api/geolocations").then((r) => r.json()),
   ]);
+
+  // Redrawing resets the New chat dropdown and the scroll position, so skip it
+  // when nothing changed since the last refresh
+  const snapshot = JSON.stringify([myName, selected, messages, contacts, gps]);
+  if (snapshot === lastSnapshot) return;
+  lastSnapshot = snapshot;
 
   fillNewChat(gps.filter((g) => !sameName(g.user, myName)));
 
@@ -226,6 +234,14 @@ document.getElementById("compose").addEventListener("submit", async (e) => {
     status.textContent = (await res.json()).error;
   }
 });
+
+// Pick up messages that arrive or get delivered in the background (sync, other devices)
+const MESSAGES_REFRESH_MS = 3000;
+setInterval(() => {
+  if (document.getElementById("messages").classList.contains("active") && !document.hidden) {
+    loadMessages().catch(() => {});  // the local app is always reachable; try again next time
+  }
+}, MESSAGES_REFRESH_MS);
 
 // Hide/show the chats sidebar (handy on narrow phone screens); remembered per browser
 const CHATS_HIDDEN_KEY = "chatsHidden";
