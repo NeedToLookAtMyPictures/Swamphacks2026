@@ -16,11 +16,22 @@ Discovery (replaces the TX/RX slot patterns from the original design):
 Per peer, the node remembers its last good sync: the next one sends only what
 changed since then, and a run of failures backs off exponentially.
 
+Two radios (a Heltec V3 board: `link` = LoRa, `fast_link` = ESP-NOW): discovery
+and the handshake always go over LoRa. HELLO and HELLO_ACK carry each side's
+position; if both are fresh and within `espnow_range` (60 m), the responder
+says so in its HELLO_ACK and both sides move the rest of the exchange to
+ESP-NOW, with ESP-NOW timings (`fast_config`). Otherwise the whole exchange
+runs over LoRa, positions first. The ESP-NOW radio is on only during an
+ESP-NOW exchange. If one fails, that peer gets LoRa for `espnow_retry`
+seconds. Without a fast_link the node uses `link` for everything, which is how
+a board is pinned to LoRa only or ESP-NOW only.
+
 The data lives in the app's database, which the app writes to directly (new
 messages, comments, its own position once a minute). The node just syncs it.
 """
 from __future__ import annotations
 
+import math
 import random
 import time
 from dataclasses import dataclass, field
@@ -31,7 +42,28 @@ from .lora import LoRaParams
 from .records import Kind, Record
 from .session import Session
 from .store import AppStore
-from .wire import ACK, BEACON, HEADER, HELLO, MAX_FRAME, PROTOCOL_VERSION, Frame, T
+from .wire import (
+    ACK,
+    BEACON,
+    HEADER,
+    HELLO,
+    HELLO_FAST_OK,
+    HELLO_HAS_FIX,
+    HELLO_USE_FAST,
+    MAX_FRAME,
+    PROTOCOL_VERSION,
+    Frame,
+    T,
+)
+
+HANDSHAKE = frozenset({T.BEACON, T.HELLO, T.HELLO_ACK})  # always on the discovery link
+
+
+def distance_m(a: tuple[float, float], b: tuple[float, float]) -> float:
+    """Great-circle distance in meters between two (latitude, longitude) points."""
+    lat1, lon1, lat2, lon2 = map(math.radians, (*a, *b))
+    h = math.sin((lat2 - lat1) / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin((lon2 - lon1) / 2) ** 2
+    return 2 * 6_371_000 * math.asin(math.sqrt(h))
 
 
 @dataclass
@@ -64,6 +96,12 @@ class Config:
     ack_max: float = 0.0  # never hold a delayed ACK longer than this
 
     accept_kinds: frozenset = field(default_factory=lambda: frozenset(Kind))
+    positions_first: bool = False  # send positions (pins) before every other record; on for LoRa
+
+    # Two radios (Node with a fast_link): switch the exchange to ESP-NOW when the peer is this close.
+    espnow_range: float = 60.0  # meters
+    position_max_age: float = 300.0  # an older own position doesn't count (the app writes one a minute)
+    espnow_retry: float = 300.0  # after an ESP-NOW exchange with a peer fails, use LoRa with it this long
 
     @classmethod
     def lora(cls, params: LoRaParams | None = None, **overrides) -> Config:
@@ -101,6 +139,7 @@ class Config:
             linger=max(3.0, 2 * rto),
             ack_delay=ack_delay,
             ack_max=burst + ack_delay,
+            positions_first=True,  # a slow link may lose the peer mid-exchange: pins matter most
         )
         values.update(overrides)
         return cls(**values)
@@ -117,8 +156,13 @@ class Node:
         on_delivered: Callable[[str, int], None] | None = None,
         on_session_end: Callable[[Session], None] | None = None,
         rng: random.Random | None = None,
+        fast_link: Link | None = None,
+        fast_config: Config | None = None,
     ):
         """
+        link:         discovery and handshake radio (and the exchange, unless fast_link takes over).
+        fast_link:    optional ESP-NOW link for exchanges with peers within cfg.espnow_range.
+        fast_config:  timings for exchanges over fast_link (default Config()).
         store:        the app's database, wrapped: AppStore(Database(...)).
         clock:        must return GPS/phone-synced unix time; all devices' windows depend on it.
         on_record:    called for every record a peer sent that changed the app's database.
@@ -135,10 +179,15 @@ class Node:
         self.on_delivered = on_delivered
         self.on_session_end = on_session_end
         self.rng = rng or random.Random()
+        self.fast_link = fast_link
+        self.fast_cfg = fast_config or Config()
 
         self.session: Session | None = None
         self._lingering: list[tuple[float, Session]] = []
         self._addr: dict[int, bytes | None] = {}  # device id -> link address
+        self._fast_addr: dict[int, bytes | None] = {}  # device id -> fast_link address
+        self._no_fast_until: dict[int, float] = {}  # peer -> LoRa only until then (an ESP-NOW exchange failed)
+        self._fast_on: bool | None = None
         # Per peer (device id):
         self._next_data: dict[int, float] = {}  # earliest time to initiate again if non-position data differs
         self._next_pos: dict[int, float] = {}  # ... if only positions differ
@@ -167,6 +216,9 @@ class Node:
         self._my_digests = None
         for rx in self.link.poll():
             self._on_rx(rx, now)
+        if self.fast_link is not None:
+            for rx in self.fast_link.poll():
+                self._on_rx(rx, now, fast=True)
 
         if self.session is not None:
             self.session.tick(now)
@@ -182,6 +234,12 @@ class Node:
             self._radio_on = awake
         if awake and self.session is None:
             self._maybe_beacon(now)
+        if self.fast_link is not None:
+            # ESP-NOW is on only while an exchange (or a finished one still acking) uses it.
+            fast = any(s.fast for s in [self.session, *(s for _, s in self._lingering)] if s is not None)
+            if fast != self._fast_on:
+                self.fast_link.set_radio(fast)
+                self._fast_on = fast
 
     # Discovery ------------------------------------------------------------------
 
@@ -249,8 +307,6 @@ class Node:
         idx = int((now + self.cfg.guard) // self.cfg.period)
         return idx * self.cfg.period - self.cfg.guard
 
-    # TODO: switch to ESP-NOW for bulk data when a LoRa peer is within ~60 m. Needs our
-    # position in HELLO/HELLO_ACK, and a link that can drive both radios on one board.
     def _select_peer(self, now: float) -> None:
         self._select_at = None
         oldest = self._fresh_since(now)
@@ -265,14 +321,19 @@ class Node:
 
     # Receive path -----------------------------------------------------------------
 
-    def _on_rx(self, rx: RxFrame, now: float) -> None:
+    def _on_rx(self, rx: RxFrame, now: float, fast: bool = False) -> None:
         f = Frame.decode(rx.payload)
         if f is None or f.sender == self.id:
             return
-        self._addr[f.sender] = rx.src
+        (self._fast_addr if fast else self._addr)[f.sender] = rx.src
 
         s = self.session
         if s is not None and f.sender == s.peer_id and f.session == s.id:
+            if f.type is T.HELLO_ACK and s.initiator and not s.fast and s.inventory_time is None:
+                if len(f.payload) >= HELLO.size and HELLO.unpack_from(f.payload)[5] & HELLO_USE_FAST:
+                    if self.fast_link is not None:  # the responder chose ESP-NOW: follow it
+                        s.reconfigure(self.fast_cfg)
+                        s.fast = True
             s.on_frame(f, now)
             return
         for _, old in self._lingering:
@@ -285,35 +346,70 @@ class Node:
         if f.type is T.BEACON and len(f.payload) >= BEACON.size:
             self._on_beacon(f, now)
         elif f.type is T.HELLO and len(f.payload) >= HELLO.size:
-            version, peer_sync, target = HELLO.unpack_from(f.payload)
+            version, peer_sync, target, lat, lon, flags = HELLO.unpack_from(f.payload)
             if version == PROTOCOL_VERSION and target == self.id:  # on LoRa everyone hears every HELLO
-                self._start_session(f.sender, initiator=False, now=now, session_id=f.session, peer_sync=peer_sync)
+                peer_pos = (lat / 1e7, lon / 1e7) if flags & HELLO_HAS_FIX else None
+                self._start_session(f.sender, initiator=False, now=now, session_id=f.session, peer_sync=peer_sync,
+                                    peer_fast_ok=bool(flags & HELLO_FAST_OK), peer_pos=peer_pos)
 
     # Sessions ---------------------------------------------------------------------
 
+    def _fast_ok(self, peer: int, now: float) -> bool:
+        return self.fast_link is not None and now >= self._no_fast_until.get(peer, 0)
+
     def _start_session(
-        self, peer: int, *, initiator: bool, now: float, session_id: int | None = None, peer_sync: int | None = None
+        self, peer: int, *, initiator: bool, now: float, session_id: int | None = None, peer_sync: int | None = None,
+        peer_fast_ok: bool = False, peer_pos: tuple[float, float] | None = None,
     ) -> None:
         self._candidates.clear()
         self._select_at = None
         self.link.set_partner(peer)
-        addr = self._addr.get(peer)
+        if self.fast_link is not None:
+            self.fast_link.set_partner(peer)
         since, exclude = self._resync.get(peer, (None, frozenset()))
-        self.session = Session(
+
+        my_pos = self.store.own_position(self.cfg.position_max_age) if self.fast_link is not None else None
+        flags = (HELLO_HAS_FIX if my_pos else 0) | (HELLO_FAST_OK if self._fast_ok(peer, now) else 0)
+        # The responder decides, from both positions, whether the exchange moves to ESP-NOW.
+        use_fast = (
+            not initiator
+            and peer_fast_ok
+            and bool(flags & HELLO_FAST_OK)
+            and my_pos is not None
+            and peer_pos is not None
+            and distance_m(my_pos, peer_pos) <= self.cfg.espnow_range
+        )
+        if use_fast:
+            flags |= HELLO_USE_FAST
+        lat, lon = my_pos or (0.0, 0.0)
+        session: Session | None = None
+
+        def send(f: Frame) -> None:
+            if session is not None and session.fast and f.type not in HANDSHAKE:
+                self.fast_link.send(f.encode(), self._fast_addr.get(peer))
+            else:
+                self.link.send(f.encode(), self._addr.get(peer))
+
+        session = Session(
             my_id=self.id,
             peer_id=peer,
             session_id=session_id if session_id is not None else self.rng.randrange(1, 0x10000),
             initiator=initiator,
             store=self.store,
-            config=self.cfg,
-            mtu=self.link.mtu,
-            send=lambda f: self.link.send(f.encode(), addr),
+            config=self.fast_cfg if use_fast else self.cfg,
+            mtu=min(self.link.mtu, self.fast_link.mtu) if self.fast_link is not None else self.link.mtu,
+            send=send,
             now=now,
             peer_sync=peer_sync,
             on_record=self._on_new_record,
             since=since,
             exclude=exclude,
+            hello_info=(round(lat * 1e7), round(lon * 1e7), flags),
         )
+        if peer_pos is not None:
+            session.peer_position = peer_pos
+        session.fast = use_fast
+        self.session = session
 
     def _on_new_record(self, rec: Record) -> None:
         d = rec.data
@@ -333,7 +429,11 @@ class Node:
         self.session = None
         self._my_digests = None  # the session may have changed the database
         self.link.set_partner(None)
+        if self.fast_link is not None:
+            self.fast_link.set_partner(None)
         peer = s.peer_id
+        if s.fast and not s.ok:
+            self._no_fast_until[peer] = now + self.cfg.espnow_retry  # out of ESP-NOW range after all
         if s.ok:
             self._fails.pop(peer, None)
             self._last_ok[peer] = now

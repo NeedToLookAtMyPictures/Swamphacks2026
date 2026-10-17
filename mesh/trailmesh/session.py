@@ -25,7 +25,7 @@ from collections import deque
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Callable
 
-from .records import ID_LEN, PRIORITY, Record
+from .records import ID_LEN, PRIORITY, Kind, Record
 from .reliable import ReliableReceiver, ReliableSender, RetriesExhausted
 from .store import AppStore
 from .wire import (
@@ -33,6 +33,7 @@ from .wire import (
     FLAG_LAST,
     HEADER,
     HELLO,
+    HELLO_HAS_FIX,
     INV_ENTRY,
     MAX_CHUNKS,
     MAX_FRAME,
@@ -70,6 +71,7 @@ class Session:
         on_record: Callable[[Record], None] | None = None,
         since: float | None = None,
         exclude: frozenset = frozenset(),
+        hello_info: tuple[int, int, int] = (0, 0, 0),
     ):
         self.my_id = my_id
         self.peer_id = peer_id
@@ -88,6 +90,9 @@ class Session:
         self.exclude = exclude
         self.inventory_time: float | None = None  # store clock when our INV was built
         self.got_ids: set[bytes] = set()  # records the peer sent us completely, kept or not
+        self.hello_info = hello_info  # (lat * 1e7, lon * 1e7, HELLO_* flags) for our HELLO / HELLO_ACK
+        self.peer_position: tuple[float, float] | None = None  # from the peer's HELLO / HELLO_ACK
+        self.fast = False  # set by the Node: after the handshake, frames go over ESP-NOW
         self._ack_first: float | None = None  # first reliable frame not yet acked (delayed ACKs)
         self._ack_last = 0.0
 
@@ -111,7 +116,7 @@ class Session:
             self._send_hello(now)
         else:
             self.state = State.ACTIVE
-            self._send_ctrl(T.HELLO_ACK, HELLO.pack(PROTOCOL_VERSION, store.last_server_sync, peer_id))
+            self._send_ctrl(T.HELLO_ACK, self._hello_payload())
             self._activate(peer_sync or 0)
 
     @property
@@ -134,11 +139,13 @@ class Session:
         if f.type is T.HELLO:
             # Our HELLO_ACK was lost and the initiator is retrying.
             if not self.initiator:
-                self._send_ctrl(T.HELLO_ACK, HELLO.pack(PROTOCOL_VERSION, self.store.last_server_sync, self.peer_id))
+                self._send_ctrl(T.HELLO_ACK, self._hello_payload())
             return
         if f.type is T.HELLO_ACK:
             if self.state is State.CONNECTING and len(f.payload) >= HELLO.size:
-                _version, peer_sync, _target = HELLO.unpack_from(f.payload)
+                _version, peer_sync, _target, lat, lon, flags = HELLO.unpack_from(f.payload)
+                if flags & HELLO_HAS_FIX:
+                    self.peer_position = (lat / 1e7, lon / 1e7)
                 self.state = State.ACTIVE
                 self._activate(peer_sync)
             return
@@ -176,7 +183,8 @@ class Session:
             self._peer_wants += [p[i : i + ID_LEN] for i in range(0, len(p) - ID_LEN + 1, ID_LEN)]
             if f.flags & FLAG_LAST:
                 recs = [r for r in map(self.store.get, self._peer_wants) if r is not None]
-                recs.sort(key=lambda r: (PRIORITY[r.kind], -r.created))
+                pins_first = self.cfg.positions_first
+                recs.sort(key=lambda r: (not (pins_first and r.kind is Kind.GEOLOCATION), PRIORITY[r.kind], -r.created))
                 self._data_iter = self._data_frames(recs)
         elif f.type is T.DATA:
             if len(f.payload) < DATA_HDR.size:
@@ -274,7 +282,16 @@ class Session:
     def _send_hello(self, now: float) -> None:
         self._hello_tries += 1
         self._hello_at = now
-        self._send_ctrl(T.HELLO, HELLO.pack(PROTOCOL_VERSION, self.store.last_server_sync, self.peer_id))
+        self._send_ctrl(T.HELLO, self._hello_payload())
+
+    def _hello_payload(self) -> bytes:
+        return HELLO.pack(PROTOCOL_VERSION, self.store.last_server_sync, self.peer_id, *self.hello_info)
+
+    def reconfigure(self, config: Config) -> None:
+        """Switch timings (ESP-NOW instead of LoRa) before anything reliable has been sent."""
+        assert self.sender.idle and self.sender.next_seq == 0
+        self.cfg = config
+        self.sender = ReliableSender(config.window_frames, config.rto, config.max_retries)
 
     # Timers -----------------------------------------------------------------
 

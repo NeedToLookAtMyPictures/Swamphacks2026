@@ -157,6 +157,13 @@ class AppStore:
         data, pos = self.digests()
         return bytes(a ^ b for a, b in zip(data, pos))
 
+    def own_position(self, max_age: float) -> tuple[float, float] | None:
+        """This user's latest (latitude, longitude) from the app, if it's at most max_age seconds old."""
+        row = self.db.get_location(self.db.get_device()["name"])
+        if row is None or self.now() - row["time_created"] > max_age:
+            return None
+        return row["latitude"], row["longitude"]
+
     @staticmethod
     def now() -> float:
         """The app database's clock, which stamps time_received and last_server_sync."""

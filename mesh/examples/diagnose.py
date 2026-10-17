@@ -3,6 +3,7 @@
 Run this on BOTH computers at the same time:
 
     python examples/diagnose.py --port /dev/ttyACM0
+    python examples/diagnose.py --board heltec --radio lora --port COM5     (or --radio espnow)
 
 Step 1 checks the USB link to the board (GET_INFO -> INFO reply).
 Step 2 broadcasts a raw test frame every second and prints everything the radio
@@ -17,7 +18,7 @@ import time
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from trailmesh.espnow_serial import CMD_GET_INFO  # noqa: E402
-from trailmesh.radio import LINKS, open_link  # noqa: E402
+from trailmesh.radio import BOARDS, open_board, radio_link  # noqa: E402
 from trailmesh.wire import Frame  # noqa: E402
 
 PING_MAGIC = b"\x00\x00\x00\x00DIAG"  # sender id 0 never decodes as a real trailmesh device
@@ -40,41 +41,48 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", required=True)
     ap.add_argument("--seconds", type=float, default=30)
-    ap.add_argument("--link", choices=LINKS, default="espnow", help="espnow_bridge or lora_bridge firmware")
+    ap.add_argument("--board", choices=BOARDS, default="espnow",
+                    help="espnow: firmware/espnow_bridge; heltec: firmware/heltec_bridge (LoRa + ESP-NOW)")
+    ap.add_argument("--radio", choices=("lora", "espnow"), help="heltec only: radio to test (default lora)")
     ap.add_argument("--sf", type=int, default=7, help="LoRa spreading factor 7-12 (all boards must match)")
     args = ap.parse_args()
+    radio = args.radio or ("lora" if args.board == "heltec" else "espnow")
 
     logs = []
-    link = open_link(args.link, args.port, sf=args.sf, log=lambda *a: logs.append(" ".join(map(str, a))))
+    board = open_board(args.board, args.port, sf=args.sf, log=lambda *a: logs.append(" ".join(map(str, a))))
+    link = radio_link(board, radio)
+    link.set_radio(True)
     try:
         print(f"[1/2] Asking the board on {args.port} for its MAC...")
         deadline = time.time() + 5
-        while link.mac is None and time.time() < deadline:
+        while board.mac is None and time.time() < deadline:
             time.sleep(0.5)
-            if link.mac is None:
-                link._write(bytes([CMD_GET_INFO]))  # GET_INFO again, in case the board was still booting
+            if board.mac is None:
+                board._write(bytes([CMD_GET_INFO]))  # GET_INFO again, in case the board was still booting
         for line in logs:
             print("      firmware log:", line)
         printed = len(logs)
-        if link.mac is None:
+        if board.mac is None:
             print("      FAIL: no reply. The bridge firmware is not running, or this is the wrong port.")
             print("      - Press the board's Reset button and run this again.")
             print("      - Re-flash firmware/espnow_bridge (Feather S3: board 'Adafruit Feather ESP32-S3',")
             print("        Tools -> USB CDC On Boot: Enabled).")
             return 1
-        print(f"      OK: firmware is responding, board MAC {fmt_mac(link.mac)}")
-        st = refresh_status(link)
+        print(f"      OK: firmware is responding, board MAC {fmt_mac(board.mac)}")
+        st = refresh_status(board)
+        lora = getattr(board, "lora_status", None)
+        if radio == "lora" and lora is not None:
+            st = lora
         if st is None:
             print("      WARNING: board sent no status block; it is running an older bridge firmware. Re-flash it.")
         elif not st["radio_on"]:
-            print(f"      FAIL: radio did not start (last error {st['last_err']:#x}); see the firmware log lines above.")
+            print(f"      FAIL: {radio} radio did not start (last error {st['last_err']:#x}); "
+                  "see the firmware log lines above.")
             return 1
+        elif radio == "lora":
+            print(f"      LoRa on, {lora['freq_hz'] / 1e6:.3f} MHz, {lora['bw_hz'] // 1000} kHz, SF{lora['sf']}")
         else:
-            lora = getattr(link, "lora_status", None)
-            if lora:
-                print(f"      radio on, {lora['freq_hz'] / 1e6:.3f} MHz, {lora['bw_hz'] // 1000} kHz, SF{lora['sf']}")
-            else:
-                print(f"      radio on, channel {st['channel']}")
+            print(f"      ESP-NOW on, channel {st['channel']}")
 
         print(f"[2/2] Broadcasting a test ping every second for {args.seconds:.0f} s; listening for the other board...")
         heard = set()
@@ -84,15 +92,17 @@ def main():
         while time.time() < end:
             now = time.time()
             if now >= next_ping:
-                link.send(PING_MAGIC + f" {fmt_mac(link.mac)} #{n}".encode())
+                link.send(PING_MAGIC + f" {fmt_mac(board.mac)} #{n}".encode())
                 n += 1
                 next_ping = now + 1
             for rx in link.poll():
-                src = fmt_mac(rx.src)
-                heard.add(src)
+                src = fmt_mac(rx.src) if rx.src else "LoRa"  # LoRa has no sender address; the ping names it
                 if rx.payload.startswith(PING_MAGIC):
-                    what = "diag ping" + rx.payload[len(PING_MAGIC):].decode(errors="replace")
+                    text = rx.payload[len(PING_MAGIC):].decode(errors="replace")
+                    heard.add(text.split("#")[0].strip())
+                    what = "diag ping" + text
                 else:
+                    heard.add(src)
                     f = Frame.decode(rx.payload)
                     what = f"trailmesh {f.type.name} from device {f.sender}" if f else f"unknown {len(rx.payload)} B"
                 print(f"      <- {src} rssi {rx.rssi} dBm: {what}")
@@ -101,11 +111,13 @@ def main():
             printed = len(logs)
             time.sleep(0.01)
 
-        st = refresh_status(link)
+        st = refresh_status(board)
+        if radio == "lora":
+            st = getattr(board, "lora_status", None)
         print()
         if st:
-            print(f"Board counters: sent ok {st['tx_ok']}, send errors {st['tx_err']}, received {st['rx']}, "
-                  f"filtered {st['rx_filtered']}, dropped {st['rx_dropped']}, last error {st['last_err']:#x}")
+            print(f"Board counters ({radio}): sent ok {st['tx_ok']}, send errors {st['tx_err']}, received {st['rx']}, "
+                  f"filtered {st['rx_filtered']}, dropped {st.get('rx_dropped', 0)}, last error {st['last_err']:#x}")
             if st["tx_err"]:
                 print("  Send errors: see the 'send failed' firmware log lines for the ESP-IDF error name.")
         if heard:
@@ -118,7 +130,7 @@ def main():
             print("If the OTHER side heard us but we heard nothing, our board's receive path is the problem.")
         return 0 if heard else 2
     finally:
-        link.close()
+        board.close()
 
 
 if __name__ == "__main__":

@@ -13,7 +13,7 @@ from enum import IntEnum
 
 from .records import ID_LEN
 
-PROTOCOL_VERSION = 3  # v3: separate data/position digests in beacons; HELLO names its target
+PROTOCOL_VERSION = 4  # v4: HELLO carries position and radio flags (switch to ESP-NOW within range)
 MAX_FRAME = 250  # ESP-NOW v1 payload limit (LoRa allows 255); no frame we send may exceed it
 
 
@@ -33,7 +33,12 @@ FLAG_LAST = 0x01  # last frame of an INV or WANT list
 
 HEADER = struct.Struct("<IBBHI")
 BEACON = struct.Struct(f"<BI{ID_LEN}s{ID_LEN}s")  # version, last_server_sync, data digest, position digest
-HELLO = struct.Struct("<BII")  # version, last_server_sync, target device id (LoRa broadcasts everything)
+# version, last_server_sync, target device id (LoRa broadcasts everything),
+# sender's latitude and longitude (degrees * 1e7), HELLO_* flags
+HELLO = struct.Struct("<BIIiiB")
+HELLO_HAS_FIX = 0x01  # the position fields are valid
+HELLO_FAST_OK = 0x02  # sender can switch to ESP-NOW for this exchange
+HELLO_USE_FAST = 0x04  # HELLO_ACK only: the responder chose ESP-NOW; all frames after the handshake go there
 ACK = struct.Struct("<II")  # next expected seq (cumulative), selective-ack bitmap of the 32 after it
 INV_ENTRY = struct.Struct(f"<{ID_LEN}sBI")  # id, kind, created
 DATA_HDR = struct.Struct(f"<{ID_LEN}sHH")  # record id, chunk index, chunk count

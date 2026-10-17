@@ -106,15 +106,15 @@ def ensure_certificate():
     print(f"Created a self-signed certificate in {DATA_DIR} for {', '.join(names + ips)}")
 
 
-def start_mesh(db, serial_port, demo, link_kind="espnow"):
+def start_mesh(db, serial_port, demo, board_kind="espnow", radio="auto"):
     """Run a mesh node on this app's database in a background thread.
 
     The node starts once the device has a name (set up in the web interface),
     since the mesh identifies devices by it.
     """
     sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "mesh"))
-    from trailmesh import AppStore, Node
-    from trailmesh.radio import config_for, open_link
+    from trailmesh import AppStore
+    from trailmesh.radio import build_node, open_board
 
     def mesh_log(*msg):
         print("[mesh]", *msg, flush=True)
@@ -122,14 +122,16 @@ def start_mesh(db, serial_port, demo, link_kind="espnow"):
     def worker():
         while db.get_device() is None:
             time.sleep(1)
-        link = open_link(link_kind, serial_port, log=mesh_log)
-        node = Node(
-            link, AppStore(db), config_for(link, always_on=demo),
+        board = open_board(board_kind, serial_port, log=mesh_log)
+        node = build_node(
+            board, AppStore(db), radio=radio, config=dict(always_on=demo),
             on_record=lambda r: mesh_log(f"received {r.kind.name.lower()} from the mesh"),
             on_delivered=lambda origin, seq: mesh_log(f"message {origin}/{seq} was delivered"),
-            on_session_end=lambda s: mesh_log(f"sync with node {s.peer_id:08x} {'ok' if s.ok else 'failed'}"),
+            on_session_end=lambda s: mesh_log(
+                f"sync with node {s.peer_id:08x} over {'ESP-NOW' if s.fast or node.link is board else 'LoRa'} "
+                f"{'ok' if s.ok else 'failed'}"),
         )
-        mesh_log(f"node {node.id:08x} running on {serial_port} ({link_kind})")
+        mesh_log(f"node {node.id:08x} running on {serial_port} ({board_kind}, radio {radio})")
         node.run_forever()
 
     threading.Thread(target=worker, daemon=True, name="mesh").start()
@@ -162,7 +164,7 @@ def run(args):
     if args.mesh_port:
         if args.debug:
             sys.exit("--mesh-port can't be combined with --debug (the reloader would open the board twice)")
-        start_mesh(app.config["DATABASE"], args.mesh_port, args.mesh_demo, args.mesh_link)
+        start_mesh(app.config["DATABASE"], args.mesh_port, args.mesh_demo, args.mesh_board, args.mesh_radio)
     ssl_context = None
     if args.https:
         ensure_certificate()
@@ -190,8 +192,10 @@ def main():
     parser.add_argument("--db", help="database file (default data/user.db); use one per hiker on a shared computer")
     parser.add_argument("--mesh-port", help="serial port of an ESP32 running the bridge firmware; syncs over the mesh")
     parser.add_argument("--mesh-demo", action="store_true", help="mesh radio always on (instant discovery)")
-    parser.add_argument("--mesh-link", choices=("espnow", "lora"), default="espnow",
-                        help="board firmware: espnow_bridge, or lora_bridge on a Heltec LoRa 32 V3")
+    parser.add_argument("--mesh-board", choices=("espnow", "heltec"), default="espnow",
+                        help="espnow: an ESP32 with espnow_bridge; heltec: a Heltec LoRa 32 V3 with heltec_bridge")
+    parser.add_argument("--mesh-radio", choices=("auto", "lora", "espnow"), default="auto",
+                        help="heltec only. auto: LoRa, switching to ESP-NOW within 60 m; lora / espnow: that radio only")
     run(parser.parse_args())
 
 

@@ -75,6 +75,7 @@ class PortInUse(Exception):
 
 class EspNowSerialLink(Link):
     mtu = 250  # ESP-NOW v1 limit; works with every ESP-IDF version
+    radio_on_at_start = True
 
     def __init__(self, port: str, baud: int = 460800, log=print, reconnect_interval: float = 1.0):
         import serial  # pyserial; imported here so the simulator works without it
@@ -92,7 +93,7 @@ class EspNowSerialLink(Link):
         self.dropped_writes = 0  # frames discarded while the board was disconnected
         # What the host wants the board to be doing. Re-sent after every (re)connect,
         # because the board forgets everything when it is unplugged or reset.
-        self._radio_wanted = True
+        self._radio_wanted = self.radio_on_at_start
         self._partner: int | None = None
         self._open()  # raises if the port doesn't exist at startup
         self._stop = threading.Event()
@@ -189,6 +190,11 @@ class EspNowSerialLink(Link):
                     self._on_info(msg)
                 elif msg[0] == EVT_LOG:
                     self._emit("[esp32]", msg[1:].decode(errors="replace"))
+                else:
+                    self._on_event(msg)
+
+    def _on_event(self, msg: bytes) -> None:
+        """Board messages this class doesn't know (subclasses for other firmware)."""
 
     def _on_info(self, msg: bytes) -> None:
         self.mac = msg[1:7]

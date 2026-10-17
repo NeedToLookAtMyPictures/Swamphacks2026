@@ -1,4 +1,4 @@
-"""LoRa support (airtime, Config.lora, LoRaSerialLink) and the Node's peer scheduling
+"""LoRa support (airtime, Config.lora, the 60 m switch to ESP-NOW, HeltecSerialLink) and the Node's peer scheduling
 (least recently synced first, position cooldown, failure backoff, change-only re-syncs)."""
 import contextlib
 import os
@@ -23,9 +23,9 @@ from trailmesh.wire import INV_ENTRY, Frame, T  # noqa: E402
 
 try:
     import serial  # noqa: F401
-    from trailmesh.lora_serial import CMD_CONFIG, LORA_STATUS, LoRaSerialLink
+    from trailmesh.heltec_serial import CMD_CONFIG, LORA_STATUS, HeltecSerialLink
 except ImportError:  # pragma: no cover
-    LoRaSerialLink = None
+    HeltecSerialLink = None
 
 FAST = dict(always_on=True, cooldown=5.0, select_delay=0.05)
 
@@ -162,8 +162,56 @@ class NodeTests(unittest.TestCase):
         self.assertIsNotNone(got())
 
 
-@unittest.skipIf(LoRaSerialLink is None, "pyserial not installed")
-class LoRaSerialLinkTests(unittest.TestCase):
+@unittest.skipIf(database is None, "the app's database.py isn't available (no checkout or git main)")
+class RadioSwitchTests(unittest.TestCase):
+    """Two radios per node: LoRa (airtime model) for discovery, ESP-NOW (fast medium) when within 60 m."""
+
+    def setUp(self):
+        self.clock = SimClock()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dir = tmp.name
+        p = LoRaParams()
+        self.lora, self.espnow = SimMedium(self.clock, airtime=p.airtime), SimMedium(self.clock)
+        self.ends = []
+        self.nodes = [
+            Node(self.lora.link(name), AppStore(new_db(self.dir, name, f"{i:08x}")),
+                 Config.lora(p, always_on=True), clock=self.clock, rng=random.Random(i),
+                 fast_link=self.espnow.link(name), on_session_end=self.ends.append)
+            for i, name in ((1, "alice"), (2, "bob"))
+        ]
+        self.espnow_frames = []
+        for n in self.nodes:
+            send = n.fast_link.send
+            n.fast_link.send = lambda payload, *a, _s=send: (self.espnow_frames.append(payload), _s(payload, *a))[1]
+
+    def sync(self, a_pos, b_pos):
+        a, b = self.nodes
+        a.store.db.set_location(*a_pos)
+        b.store.db.set_location(*b_pos)
+        loc = a.store.db.add_locale("spring-1203", "Mile 1203 spring", "w" * 2000)
+        got = lambda: b.store.db.get("locales", loc["origin_id"], loc["seq"])  # noqa: E731
+        run(self.nodes, self.clock, 60, until=lambda: got() and len(self.ends) >= 2)
+        self.assertIsNotNone(got())
+        return self.ends[0]
+
+    def test_close_peers_exchange_over_espnow(self):
+        s = self.sync((29.650000, -82.320000), (29.650200, -82.320000))  # ~22 m apart
+        self.assertTrue(s.fast)
+        self.assertGreater(len(self.espnow_frames), 5)
+        run(self.nodes, self.clock, 5)  # past the finished session's linger
+        self.assertFalse(any(n.fast_link.radio_on for n in self.nodes), "ESP-NOW is off again afterwards")
+
+    def test_distant_peers_stay_on_lora(self):
+        s = self.sync((29.650000, -82.320000), (29.660000, -82.320000))  # ~1.1 km apart
+        self.assertFalse(s.fast)
+        self.assertEqual(self.espnow_frames, [])
+        a, b = self.nodes
+        self.assertEqual(b.store.db.get_location("alice")["latitude"], 29.65, "positions travel over LoRa too")
+
+
+@unittest.skipIf(HeltecSerialLink is None, "pyserial not installed")
+class HeltecSerialLinkTests(unittest.TestCase):
     def test_configures_board_and_recovers_from_reboot(self):
         configs = []
 
@@ -186,13 +234,13 @@ class LoRaSerialLinkTests(unittest.TestCase):
                         elif msg[0] == 0x03:
                             board["radio"] = bool(msg[1])
                         elif msg[0] == CMD_GET_INFO:
-                            st = STATUS.pack(board["radio"], 7, 0, 0, 0, 0, 0, 0)
-                            lora = LORA_STATUS.pack(915_000_000, 500_000, 7, 5, 20, 0, 0, 0, 0)
+                            st = STATUS.pack(board["radio"], 6, 0, 0, 0, 0, 0, 0)
+                            lora = LORA_STATUS.pack(0, 0, 0, 0, 0, 0, 915_000_000, 500_000, 7, 5, 20, 0, 0, 0, 0)
                             self._write(board, bytes([EVT_INFO]) + board["mac"] + st + lora)
 
         fake = FakeLoRa(ports=(0,))
         params = LoRaParams(sf=9)
-        link = LoRaSerialLink(fake.boards[0]["port"], params, log=None)
+        link = HeltecSerialLink(fake.boards[0]["port"], params, log=None)
         try:
             deadline = time.time() + 3
             while link.lora_status is None and time.time() < deadline:

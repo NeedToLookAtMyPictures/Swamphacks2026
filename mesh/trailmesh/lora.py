@@ -10,7 +10,7 @@ import math
 import struct
 from dataclasses import dataclass
 
-# host -> board CONFIG payload (must match `struct RadioConfig` in firmware/lora_bridge)
+# host -> board CONFIG payload (must match `struct RadioConfig` in firmware/heltec_bridge)
 CONFIG = struct.Struct("<IIBBb")  # freq_hz, bw_hz, sf, cr (4/cr), power_dbm
 
 BANDWIDTHS = (125_000, 250_000, 500_000)

@@ -27,8 +27,8 @@ sys.path.insert(0, os.path.join(HERE, "..", "..", "application", "user_app"))
 
 from database import BROADCAST, Database  # noqa: E402  (the app's database)
 
-from trailmesh import AppStore, Node  # noqa: E402
-from trailmesh.radio import LINKS, config_for, open_link  # noqa: E402
+from trailmesh import AppStore  # noqa: E402
+from trailmesh.radio import BOARDS, RADIOS, build_node, open_board  # noqa: E402
 
 
 def app_db(directory, name, device_id):
@@ -42,7 +42,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--port-a", required=True)
     ap.add_argument("--port-b", required=True)
-    ap.add_argument("--link", choices=LINKS, default="espnow", help="espnow_bridge or lora_bridge firmware")
+    ap.add_argument("--board", choices=BOARDS, default="espnow",
+                    help="espnow: firmware/espnow_bridge; heltec: firmware/heltec_bridge (LoRa + ESP-NOW)")
+    ap.add_argument("--radio", choices=RADIOS, default="auto", help="heltec only: auto, lora or espnow")
     ap.add_argument("--sf", type=int, default=7, help="LoRa spreading factor 7-12 (all boards must match)")
     ap.add_argument("--size", type=int, default=51200, help="message length in characters")
     ap.add_argument("--timeout", type=float, default=90)
@@ -52,9 +54,9 @@ def main():
 
     log = lambda *m: print(f"{time.time() - t0:6.2f}s", *m)  # noqa: E731
     t0 = time.time()
-    la = open_link(args.link, args.port_a, sf=args.sf, log=log)
-    lb = open_link(args.link, args.port_b, sf=args.sf, log=log)
-    time.sleep(1)  # let both radios come up
+    la = open_board(args.board, args.port_a, sf=args.sf, log=log)
+    lb = open_board(args.board, args.port_b, sf=args.sf, log=log)
+    time.sleep(1)  # let both boards come up
 
     def on_end(me):
         return lambda s: log(f"{me}'s session with node {s.peer_id:08x}: {'ok' if s.ok else 'FAILED'}, "
@@ -62,8 +64,9 @@ def main():
 
     tmp = tempfile.mkdtemp(prefix="bulk_test-")
     alice, bob = app_db(tmp, "alice", "00000001"), app_db(tmp, "bob", "00000002")
-    a = Node(la, AppStore(alice), config_for(la, always_on=True), on_session_end=on_end("alice"))
-    b = Node(lb, AppStore(bob), config_for(lb, always_on=True, retry_backoff=2.0), on_session_end=on_end("bob"))
+    a = build_node(la, AppStore(alice), radio=args.radio, config=dict(always_on=True), on_session_end=on_end("alice"))
+    b = build_node(lb, AppStore(bob), radio=args.radio, config=dict(always_on=True, retry_backoff=2.0),
+                   on_session_end=on_end("bob"))
     urgent = alice.add_locale("spring-1203", "Spring at mile 1203", "dry")
     big = alice.add_message(BROADCAST, "".join(random.choices(string.ascii_letters, k=args.size)))
     t0 = time.time()
@@ -78,11 +81,11 @@ def main():
         now = time.time() - t0
         if cut_state == "pending" and now >= args.cut_after:
             log(">>> B walks out of range (radio off)")
-            lb.set_radio(False)
+            b.link.set_radio(False)
             cut_state = "cut"
         elif cut_state == "cut" and now >= args.cut_after + args.cut_for:
             log(">>> B is back in range (radio on)")
-            lb.set_radio(True)
+            b.link.set_radio(True)
             cut_state = "restored"
         a.poll()
         b.poll()
