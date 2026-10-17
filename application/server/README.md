@@ -118,8 +118,9 @@ page and add records through the API.
 ## How syncing works
 
 While the user app runs, it looks for a server every 30 seconds
-(`user_app/server_sync.py`). Offline, the request fails quietly. As soon as a
-server answers, the app:
+(`user_app/server_sync.py`). Offline, the request fails quietly. Once a server
+answers, the app syncs with it every 5 seconds (`SYNC_EVERY`) until a sync fails,
+then goes back to looking. Each sync, the app:
 
 1. sends every record that **arrived on the device** since its last push. This
    includes records it got from other people, however old they are;

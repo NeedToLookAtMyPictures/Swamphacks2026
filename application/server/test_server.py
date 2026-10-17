@@ -90,6 +90,20 @@ class ServerSyncTest(unittest.TestCase):
         names = [u["name"] for u in self.client.get("/api/users").json]
         self.assertEqual(names, ["alice", "dave", "erin"])
 
+    def test_loop_syncs_often_while_connected_and_looks_again_when_lost(self):
+        finder = mock.Mock(current=("x", "configured"))
+        finder.find.return_value = "x"
+        loop = server_sync.SyncLoop(self.alice, finder)
+        self.assertEqual(loop.step(), server_sync.SYNC_EVERY)
+        self.assertEqual(loop.step(), server_sync.SYNC_EVERY)
+        self.assertEqual(finder.find.call_count, 1)  # stays with the server it found
+        with mock.patch.object(server_sync, "sync_once", side_effect=OSError("gone")):
+            self.assertEqual(loop.step(), server_sync.CHECK_EVERY)
+        self.assertIsNone(loop.url)
+        finder.find.return_value = None
+        self.assertEqual(loop.step(), server_sync.CHECK_EVERY)
+        self.assertEqual(finder.find.call_count, 2)
+
     def test_new_server_gets_a_full_exchange(self):
         # alice synced with one server; her cursors mean nothing to another one
         self.alice.add_message("bob", "hi")

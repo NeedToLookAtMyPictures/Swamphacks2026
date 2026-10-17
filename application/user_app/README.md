@@ -43,8 +43,8 @@ python main.py --server ""           # no server address, only look on the wifi
 python main.py --no-lan              # don't look for a server on the wifi
 ```
 
-A background thread looks for a server every 30 seconds and syncs whenever one
-answers: the ones given with `--server` (or `SERVER_URL`; several can be
+A background thread looks for a server every 30 seconds, and while one answers
+it syncs every 5 seconds. It tries the ones given with `--server` (or `SERVER_URL`; several can be
 comma-separated and are tried in order), by default the demo server's public URL
 `https://heuslerene.com/server` (`PUBLIC_SERVER_URL` in `main.py`, see
 `../server/README.md`) and then its wifi

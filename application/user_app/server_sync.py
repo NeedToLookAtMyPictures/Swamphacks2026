@@ -1,10 +1,10 @@
 """Background sync with the server.
 
-While the app is running, a thread checks every CHECK_EVERY seconds whether a
-server can be reached: the one given with --server, or else one on the same wifi
-(see discovery.py). Whenever one can, the device sends the records that arrived
-since its last push and merges what the server got since its last pull. When the
-device is offline the request just fails and it tries again later.
+While the app is running, a thread looks for a server every CHECK_EVERY seconds:
+the ones given with --server, or else one on the same wifi (see discovery.py).
+Once it reaches one, it syncs with it every SYNC_EVERY seconds: the device sends
+the records that arrived since its last push and merges what the server got
+since its last pull. If a sync fails, it goes back to looking.
 
 Only the standard library is used, so the app has no extra dependency.
 """
@@ -17,7 +17,8 @@ import urllib.request
 
 import discovery
 
-CHECK_EVERY = 30   # seconds
+SYNC_EVERY = 5     # seconds between syncs while a server answers
+CHECK_EVERY = 30   # seconds between looking for a server while there is none
 TIMEOUT = 15       # seconds, for a sync
 PING_TIMEOUT = 3   # seconds, for checking whether a server is there
 
@@ -113,29 +114,39 @@ class ServerFinder:
         return ", or ".join(choices) or "nothing (offline only)"
 
 
+class SyncLoop:
+    """One step at a time, so the background thread stays a plain loop."""
+
+    def __init__(self, db, finder):
+        self.db, self.finder = db, finder
+        self.url = None  # the server we're connected to, if any
+
+    def step(self):
+        """Sync once, looking for a server first if we have none.
+        Returns how long to wait before the next step."""
+        if self.url is None:
+            self.url = self.finder.find()
+            if self.url is None:
+                return CHECK_EVERY
+            print(f"Connected to {self.url} ({self.finder.current[1]})")
+        try:
+            merged = sync_once(self.db, self.url)
+        except (OSError, ServerError, ValueError) as exc:
+            print(f"Server sync failed: {exc}")
+            self.url = self.finder.current = None
+            return CHECK_EVERY
+        if merged and any(merged.values()):
+            print(f"Synced with server: {merged}")
+        return SYNC_EVERY
+
+
 def start(db, finder):
     """Sync with the server in a background thread for as long as the app runs."""
+    sync = SyncLoop(db, finder)
+
     def loop():
-        connected = None
         while True:
-            url = finder.find()
-            if url is None:
-                if connected:
-                    print(f"Lost the server {connected}")
-                connected = None
-            else:
-                try:
-                    merged = sync_once(db, url)
-                    if url != connected:
-                        print(f"Connected to {url} ({finder.current[1]})")
-                    connected = url
-                    if merged and any(merged.values()):
-                        print(f"Synced with server: {merged}")
-                except (OSError, ServerError, ValueError) as exc:
-                    if connected or isinstance(exc, ServerError):
-                        print(f"Server sync failed: {exc}")
-                    connected = None
-            time.sleep(CHECK_EVERY)
+            time.sleep(sync.step())
 
     thread = threading.Thread(target=loop, name="server-sync", daemon=True)
     thread.start()
