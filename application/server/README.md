@@ -126,7 +126,8 @@ then goes back to looking. Each sync, the app:
    includes records it got from other people, however old they are;
 2. gets every record that arrived on the server since the device's last pull;
 3. merges them and saves both cursors in `device_info`;
-4. gets the server's global data, if the device's copy differs (see below).
+4. gets the server's global data, if the device's copy differs (see below);
+5. downloads the server's offline map, if the device's copy differs (see below).
 
 Each cursor uses the clock of the machine it describes (`last_push` the device's,
 `server_cursor` the server's), so the two clocks never need to agree. Every sync
@@ -159,6 +160,22 @@ python server.py --load-global my_global_data.json
 
 The database page shows it as `global_locales` and `global_trails`.
 
+## Offline map
+
+The server also keeps the offline map devices show: `map/map.pmtiles` (Protomaps
+vector tiles of Gainesville to Hawthorne, zoom 8-15, about 8 MB) and
+`map/map.json` (its name, bounds and zoom levels). Both are in the repository;
+`MAP_DIR` picks another folder. The map's version is the file's SHA-256. Devices
+send the version they have with every sync, and when it differs the reply says a
+map is available; the device then downloads `/api/map.pmtiles`, checks it
+against the version, and only then replaces its `data/map.pmtiles`. If the
+download fails the old map stays and the next sync tries again. The open page
+switches to the new map by itself within 10 seconds.
+
+To change it, make a new map with `../user_app/download_locales.py map` (it
+writes `data/map.pmtiles` and `data/map.json` in `user_app`), copy both into
+`map/` and restart the server.
+
 ## Relaying
 
 The server is a relay: it has no user identity of its own and never marks messages
@@ -172,7 +189,9 @@ tombstone travels back through the server to everyone else.
 | GET | `/` | page showing the whole database |
 | GET | `/api/health` | is the server up, and its `server_id` |
 | POST | `/api/register` | reserve a name `{name, device_id?}` → `{name, device_id}`; 409 if taken |
-| POST | `/api/sync` | `{device_id, name, cursor, records, global_version?}` → `{cursor, records, merged, server_id, global_version?, global?}`; `global` only when the device's version differs |
+| POST | `/api/sync` | `{device_id, name, cursor, records, global_version?, map_version?}` → `{cursor, records, merged, server_id, global_version?, global?, map_version?, map?}`; `global` and `map` only when the device's version differs (`map` is `{version, size, info}`, the file itself comes from `/api/map.pmtiles`) |
+| GET | `/api/map.json` | the offline map's info `{name, bbox, center, min_zoom, max_zoom, version}` |
+| GET | `/api/map.pmtiles` | the offline map file (supports range requests) |
 | GET | `/api/users` | every registered name |
 | GET | `/api/global` | all global data `{version, locales, trails}`, trails as GPX |
 | GET | `/api/global_locales` | global locales (for the database page) |

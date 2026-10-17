@@ -19,7 +19,6 @@ Two hikers on one computer (each with its own database, web port and board):
 
 import argparse
 import ipaddress
-import json
 import os
 import socket
 import subprocess
@@ -31,10 +30,10 @@ from pathlib import Path
 from flask import Flask, render_template, send_file
 
 import server_sync
-from api import api
+from api import api, load_map_info
 from database import Database
 from global_database import GlobalDatabase
-from download_locales import DATA_DIR, DEFAULT_BBOX, MAP_FILE, MAP_INFO_FILE
+from download_locales import DATA_DIR, MAP_FILE
 
 # The demo server (the laptop running application/server), tried in this order.
 # PUBLIC_SERVER_URL is its address on the internet (server/serve_public.sh prints
@@ -57,19 +56,6 @@ app.config["DATABASE"] = Database()
 app.config["SERVER"] = None  # a server_sync.ServerFinder, set in run()
 app.config["GLOBAL_DATABASE"] = GlobalDatabase()
 app.register_blueprint(api)
-
-
-def load_map_info():
-    if MAP_FILE.exists() and MAP_INFO_FILE.exists():
-        return json.loads(MAP_INFO_FILE.read_text())
-    min_lon, min_lat, max_lon, max_lat = DEFAULT_BBOX
-    return {
-        "name": None,
-        "bbox": DEFAULT_BBOX,
-        "center": [(min_lat + max_lat) / 2, (min_lon + max_lon) / 2],
-        "min_zoom": 8,
-        "max_zoom": 15,
-    }
 
 
 @app.route("/")
@@ -160,7 +146,7 @@ def run(args):
     if (args.server or not args.no_lan) and (
             not args.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true"):
         print(f"Syncing with {finder.describe()} whenever it can be reached")
-        server_sync.start(app.config["DATABASE"], finder, app.config["GLOBAL_DATABASE"])
+        server_sync.start(app.config["DATABASE"], finder, app.config["GLOBAL_DATABASE"], DATA_DIR)
     if args.mesh_port:
         if args.debug:
             sys.exit("--mesh-port can't be combined with --debug (the reloader would open the board twice)")

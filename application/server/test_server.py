@@ -1,5 +1,7 @@
 """Run with: python -m unittest test_server"""
 
+import hashlib
+import json
 import os
 import tempfile
 import time
@@ -140,6 +142,91 @@ class ServerSyncTest(unittest.TestCase):
         response = self.client.post("/api/sync", json={"name": "alice", "device_id": "d-alice"})
         self.assertNotIn("global", response.json)
         self.assertNotIn("global_version", response.json)
+        self.assertNotIn("map", response.json)
+        self.assertNotIn("map_version", response.json)
+
+    def test_server_has_the_gainesville_hawthorne_map(self):
+        offline_map = server.read_map(server.MAP_DIR)
+        self.assertEqual(offline_map["info"]["name"], "Gainesville to Hawthorne, Florida")
+        with offline_map["path"].open("rb") as f:
+            self.assertEqual(f.read(7), b"PMTiles")
+        info = self.client.get("/api/map.json").json
+        self.assertEqual(info["version"], offline_map["version"])
+        self.assertEqual(info["bbox"], [-82.42, 29.56, -82.05, 29.73])
+
+    def use_map_server(self, tiles):
+        """Point the test client at a server with a small map; returns that map's folder."""
+        server_map = Path(self.tmp.name) / "server-map"
+        server_map.mkdir(exist_ok=True)
+        (server_map / "map.pmtiles").write_bytes(tiles)
+        (server_map / "map.json").write_text('{"name": "Test area", "bbox": [0, 0, 1, 1]}')
+        self.client = server.create_app(Path(self.tmp.name) / "map.db",
+                                        map_dir=server_map).test_client()
+        return server_map
+
+    def fake_download(self, _url, path, dest, timeout=None):
+        data = self.client.get(path).data
+        Path(dest).write_bytes(data)
+        return hashlib.sha256(data).hexdigest()
+
+    def test_map_reaches_devices_once_and_updates_follow(self):
+        server_map = self.use_map_server(b"first map")
+        device_map = Path(self.tmp.name) / "alice-data"
+        with mock.patch.object(server_sync, "download", side_effect=self.fake_download) as dl:
+            server_sync.sync_once(self.alice, "x", map_dir=device_map)
+            self.assertEqual((device_map / "map.pmtiles").read_bytes(), b"first map")
+            info = json.loads((device_map / "map.json").read_text())
+            self.assertEqual(info["name"], "Test area")
+            self.assertEqual(info["version"], hashlib.sha256(b"first map").hexdigest())
+            # Up to date: not downloaded again
+            server_sync.sync_once(self.alice, "x", map_dir=device_map)
+            self.assertEqual(dl.call_count, 1)
+            # The server gets a new map; the device follows on its next sync
+            (server_map / "map.pmtiles").write_bytes(b"second map")
+            server_app = self.client.application.config["SERVER"]
+            server_app.map = server.read_map(server_map)
+            server_sync.sync_once(self.alice, "x", map_dir=device_map)
+            self.assertEqual((device_map / "map.pmtiles").read_bytes(), b"second map")
+        self.assertFalse((device_map / "map.pmtiles.part").exists())
+
+    def test_a_bad_map_download_keeps_the_old_map(self):
+        self.use_map_server(b"new map")
+        device_map = Path(self.tmp.name) / "alice-data"
+        device_map.mkdir()
+        (device_map / "map.pmtiles").write_bytes(b"old map")
+        (device_map / "map.json").write_text('{"name": "Old area"}')  # no version: replaced
+
+        def truncated(url, path, dest, timeout=None):
+            self.fake_download(url, path, dest)
+            Path(dest).write_bytes(b"new m")
+            return hashlib.sha256(b"new m").hexdigest()
+
+        with mock.patch.object(server_sync, "download", side_effect=truncated):
+            merged = server_sync.sync_once(self.alice, "x", map_dir=device_map)
+        self.assertIsNotNone(merged)  # the records still synced
+        self.assertEqual((device_map / "map.pmtiles").read_bytes(), b"old map")
+        self.assertEqual(json.loads((device_map / "map.json").read_text())["name"], "Old area")
+        self.assertFalse((device_map / "map.pmtiles.part").exists())
+        # Tried again on the next sync
+        with mock.patch.object(server_sync, "download", side_effect=self.fake_download):
+            server_sync.sync_once(self.alice, "x", map_dir=device_map)
+        self.assertEqual((device_map / "map.pmtiles").read_bytes(), b"new map")
+
+    def test_server_without_a_map(self):
+        self.client = server.create_app(Path(self.tmp.name) / "nomap.db",
+                                        map_dir=Path(self.tmp.name) / "missing").test_client()
+        self.assertEqual(self.client.get("/api/map.pmtiles").status_code, 404)
+        self.assertEqual(self.client.get("/api/map.json").status_code, 404)
+        response = self.client.post("/api/sync", json={"name": "alice", "device_id": "d-alice",
+                                                       "map_version": None})
+        self.assertIsNone(response.json["map_version"])
+        self.assertNotIn("map", response.json)
+
+    def test_map_file_supports_range_requests(self):
+        self.use_map_server(b"0123456789")
+        response = self.client.get("/api/map.pmtiles", headers={"Range": "bytes=2-4"})
+        self.assertEqual(response.status_code, 206)
+        self.assertEqual(response.data, b"234")
 
     def test_new_server_gets_a_full_exchange(self):
         # alice synced with one server; her cursors mean nothing to another one

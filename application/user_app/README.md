@@ -22,6 +22,9 @@ python download_locales.py map    # Gainesville to Hawthorne, FL, zoom 8-15
 requests to pull only the tiles inside the area, and saves them as one file,
 `data/map.pmtiles` (git-ignored). Running it again replaces the old map.
 
+You can skip this when the app can reach a server: it downloads the server's map
+(`application/server/map/`) during sync, and replaces a map made here with it.
+
 Other areas and sources:
 
 ```bash
