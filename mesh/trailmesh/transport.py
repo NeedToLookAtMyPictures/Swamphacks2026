@@ -23,7 +23,6 @@ from typing import Callable
 ESP_USB_VIDS = {
     0x303A,  # Espressif: any ESP32-S3 on its built-in USB (generic ESP32-S3FN8 boards)
     0x239A,  # Adafruit: Feather ESP32-S3 running TinyUSB firmware
-    0x10C4,  # Silicon Labs CP2102: the USB-UART chip on Heltec WiFi LoRa 32 V3 boards
 }
 
 # USB-to-UART bridge chips that dev boards without native USB (classic ESP32
@@ -31,7 +30,7 @@ ESP_USB_VIDS = {
 # Other gadgets use these chips too, so they are only tried when no board
 # above is plugged in.
 USB_UART_BRIDGE_VIDS = {
-    0x10C4,  # Silicon Labs CP210x
+    0x10C4,  # Silicon Labs CP210x (the Heltec WiFi LoRa 32 V3's CP2102)
     0x1A86,  # WCH CH340 / CH9102
     0x0403,  # FTDI
 }
