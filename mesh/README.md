@@ -51,7 +51,7 @@ the window until the exchange ends.
 2. INV: `(id, kind, created)` of every record eligible under the cutoff
 3. WANT: ids from the peer's INV that I don't have
 4. DATA: wanted records, chunked to fit the MTU, highest priority first
-   (locale updates, messages, pins, images, maps), then DONE
+   (locale updates, messages, pins), then DONE
 
 Every INV/WANT/DATA/DONE frame is reliable (seq + ACK with a 32-bit selective-ack
 bitmap, retransmit after `rto`, give up after `max_retries`). If no frame arrives

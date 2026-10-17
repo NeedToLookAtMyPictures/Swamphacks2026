@@ -137,7 +137,7 @@ which is enough because only the initiator starts sessions.
 | `window_frames` | 16 | Max unacked frames in flight |
 | `idle_timeout` | 4 s | Peer silent this long: session fails |
 | `linger` | 3 s | Keep ACKing a finished session's frames this long |
-| `accept_kinds` | all | Kinds we request from peers (e.g. leave MAP out to save space) |
+| `accept_kinds` | all | Kinds we request from peers (e.g. leave PIN out to save space) |
 | `pin_interval` | 300 s | Minimum gap between automatic own-position pins |
 
 ## Assumptions

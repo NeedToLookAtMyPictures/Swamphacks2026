@@ -67,7 +67,7 @@ for each record: split encode() into 226-byte chunks, send DATA(id, i, count, ch
 then send DONE
 ```
 This is a **lazy generator**. Frames are created only as the send window frees
-up, so a large map doesn't fill memory with queued frames.
+up, so a large record doesn't fill memory with queued frames.
 
 ### Step 4: receiving DATA
 ```
@@ -153,7 +153,7 @@ retransmitting DONE to a peer that has already finished. Two things cover it:
   sending `chunk_index >= chunk_count` (a `KeyError` in the join), propagates
   out of `on_frame`, then `Node._on_rx`, then `Node.poll()`. Wrapping the
   decode in a try/except, and ignoring indexes `>= count`, would fix it.
-- **There's no maximum session length.** If the peer stays in range, a huge map
+- **There's no maximum session length.** If the peer stays in range, a huge record
   keeps the radio on until it finishes.
 - **`records_sent` counts queued records,** so it can overstate what the peer
   actually received in a failed session.
