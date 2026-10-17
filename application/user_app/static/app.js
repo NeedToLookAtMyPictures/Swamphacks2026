@@ -45,3 +45,4 @@ document.querySelectorAll(".tab").forEach((t) =>
   t.addEventListener("click", () => showTab(t.dataset.tab)));
 
 loadMessages();  // Messages is the tab shown on load
+startLocationUpdates();

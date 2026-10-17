@@ -148,6 +148,15 @@ connects), and `path`, the route as `[lat, lon]` points.
 
 Tests: `python -m unittest test_database test_trail_distance`
 
+## Location
+
+While the app is open, `static/location.js` reads the device's position from
+the browser once a minute and saves it with `PUT /api/location`. This works
+offline on devices with GPS (phones); laptops without GPS usually need internet
+to locate themselves. Browsers only allow geolocation on `localhost` or HTTPS,
+so opening the app from another device over plain `http://<lan-ip>` won't report
+a position. Updates pause while the tab is hidden or the phone is locked.
+
 ## Tabs
 
 - **Messages**: a sidebar with one conversation per person you've messaged with, with Everyone pinned to the top; click one to see its history and send to that person. The New chat dropdown lists everyone in your GPS data (newest first), or Other to type any name
