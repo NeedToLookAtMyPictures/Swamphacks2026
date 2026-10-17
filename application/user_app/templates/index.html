@@ -16,20 +16,30 @@
 
   <main>
     <section id="messages" class="panel active">
-      <form id="compose">
-        <label>To
-          <select id="compose-to" required></select>
-        </label>
-        <input id="compose-other" list="contact-list" placeholder="Type a name"
-               pattern="[A-Za-z0-9_\-]{1,32}" autocomplete="off" hidden>
-        <datalist id="contact-list"></datalist>
-        <textarea id="compose-content" placeholder="Message" rows="3" required></textarea>
-        <div class="compose-row">
-          <span id="compose-status"></span>
-          <button>Send</button>
+      <aside id="chat-sidebar">
+        <form id="new-chat">
+          <select id="new-chat-to" required></select>
+          <input id="new-chat-name" list="contact-list" placeholder="Type a name"
+                 pattern="[A-Za-z0-9_\-]{1,32}" autocomplete="off" hidden>
+          <datalist id="contact-list"></datalist>
+          <button id="new-chat-go" hidden>Start</button>
+        </form>
+        <div id="chat-list"></div>
+      </aside>
+      <div id="chat-view">
+        <div id="chat-header">
+          <button id="chat-sidebar-toggle" type="button" aria-controls="chat-sidebar">&#9776;</button>
+          <span id="chat-title"></span>
         </div>
-      </form>
-      <div id="message-list"></div>
+        <div id="message-list"></div>
+        <form id="compose">
+          <textarea id="compose-content" placeholder="Message" rows="2" required></textarea>
+          <div class="compose-row">
+            <span id="compose-status"></span>
+            <button>Send</button>
+          </div>
+        </form>
+      </div>
     </section>
 
     <section id="map" class="panel">
@@ -37,6 +47,64 @@
       <div class="notice">No offline map downloaded. Run <code>python download_locales.py map</code>.</div>
       {% endif %}
       <div id="leaflet-map"></div>
+      <div id="locale-sheet" hidden>
+        <div class="locale-sheet-top">
+          <div id="locale-sheet-head"></div>
+          <button id="locale-sheet-close" type="button" aria-label="Close">&times;</button>
+        </div>
+        <div class="locale-sheet-body">
+          <div id="locale-info"></div>
+          <h3>Comments</h3>
+          <form id="locale-comment-form">
+            <textarea id="locale-comment-text" rows="2" placeholder="Add a comment about this site" required></textarea>
+            <div class="compose-row">
+              <span id="locale-comment-status"></span>
+              <button>Post</button>
+            </div>
+          </form>
+          <p id="locale-comment-setup" class="locale-note" hidden>Set up this device (Debug tab) to add comments.</p>
+          <div id="locale-comments"></div>
+        </div>
+      </div>
+      <div id="map-settings">
+        <button id="map-settings-toggle" type="button" title="Map settings" aria-label="Map settings">&#9881;</button>
+        <div id="map-settings-panel" hidden>
+          <div class="settings-view" data-view="menu">
+            <div class="settings-title">Settings</div>
+            <button class="settings-item" type="button" data-open="last-known">Last known location <span>&rsaquo;</span></button>
+            <button class="settings-item" type="button" data-open="locales">Locales <span>&rsaquo;</span></button>
+            <button class="settings-item" type="button" data-open="trails">Trails <span>&rsaquo;</span></button>
+          </div>
+          <div class="settings-view" data-view="last-known" hidden>
+            <div class="settings-header">
+              <button class="settings-back" type="button" data-open="menu" aria-label="Back">&lsaquo;</button>
+              <span class="settings-title">Last known location</span>
+            </div>
+            <input id="last-known-search" type="search" placeholder="Search people" autocomplete="off">
+            <div id="last-known-list"></div>
+          </div>
+          <div class="settings-view" data-view="locales" hidden>
+            <div class="settings-header">
+              <button class="settings-back" type="button" data-open="menu" aria-label="Back">&lsaquo;</button>
+              <span class="settings-title">Locales</span>
+            </div>
+            <input id="locales-search" type="search" placeholder="Search locales" autocomplete="off">
+            <div class="settings-actions">
+              <button id="locales-show-all" type="button">Show all</button>
+              <button id="locales-hide-all" type="button">Hide all</button>
+            </div>
+            <div id="locales-list"></div>
+          </div>
+          <div class="settings-view" data-view="trails" hidden>
+            <div class="settings-header">
+              <button class="settings-back" type="button" data-open="menu" aria-label="Back">&lsaquo;</button>
+              <span class="settings-title">Trails</span>
+            </div>
+            <input id="trails-search" type="search" placeholder="Search trails" autocomplete="off">
+            <div id="trails-list"></div>
+          </div>
+        </div>
+      </div>
     </section>
 
     <section id="debug" class="panel">
@@ -54,6 +122,11 @@
   <script src="{{ url_for('static', filename='vendor/protomaps-leaflet/protomaps-leaflet.js') }}"></script>
   <script src="{{ url_for('static', filename='messages.js') }}"></script>
   <script src="{{ url_for('static', filename='debug.js') }}"></script>
+  <script src="{{ url_for('static', filename='map-settings.js') }}"></script>
+  <script src="{{ url_for('static', filename='global-locales.js') }}"></script>
+  <script src="{{ url_for('static', filename='locale-sheet.js') }}"></script>
+  <script src="{{ url_for('static', filename='trails.js') }}"></script>
+  <script src="{{ url_for('static', filename='location.js') }}"></script>
   <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
 </html>
