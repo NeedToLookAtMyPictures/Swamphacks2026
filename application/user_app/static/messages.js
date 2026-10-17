@@ -54,7 +54,6 @@ function renderMessage(m) {
 
 let lastMessages = [];
 let lastPeople = [];
-let lastSeen = new Map();  // lowercase name -> time of their latest GPS position
 
 async function loadMessages() {
   const list = document.getElementById("message-list");
@@ -73,9 +72,7 @@ async function loadMessages() {
     fetch("/api/geolocations").then((r) => r.json()),
   ]);
 
-  const others = gps.filter((g) => !sameName(g.user, myName));
-  fillNewChat(others);
-  lastSeen = new Map(others.map((g) => [g.user.toLowerCase(), g.time_created]));
+  fillNewChat(gps.filter((g) => !sameName(g.user, myName)));
 
   // Suggestions for the "Type a name" box: everyone this device knows about
   const options = document.getElementById("contact-list");
@@ -91,7 +88,7 @@ async function loadMessages() {
     .filter((m) => m.receiver === BROADCAST || [m.sender, m.receiver].some((n) => sameName(n, myName)))
     .sort((a, b) => a.time_created - b.time_created);  // oldest first, like a chat
 
-  // One conversation per person I've messaged with or seen on GPS
+  // One conversation per person I've messaged with
   const latest = new Map();  // lowercase name -> {name, time}
   const note = (name, time) => {
     if (!name || name === BROADCAST || sameName(name, myName)) return;
@@ -99,7 +96,6 @@ async function loadMessages() {
     const prev = latest.get(key);
     if (!prev || time > prev.time) latest.set(key, { name: prev ? prev.name : name, time });
   };
-  gps.forEach((g) => note(g.user, 0));  // seen but never messaged: listed after conversations
   lastMessages.forEach((m) => note(conversationOf(m), m.time_created));
   // A chat just started from the "New chat" box has no messages yet; keep it on top
   if (selected && selected !== BROADCAST && !latest.has(selected.toLowerCase())) {
@@ -128,10 +124,7 @@ function render() {
   };
   const previewOf = (who) => {
     const last = lastMessages.filter((m) => inConversation(m, who)).at(-1);
-    if (!last) {
-      const seen = who !== BROADCAST && lastSeen.get(who.toLowerCase());
-      return seen ? `Seen ${new Date(seen * 1000).toLocaleString()}` : "No messages yet";
-    }
+    if (!last) return "No messages yet";
     return (sameName(last.sender, myName) ? "You: " : who === BROADCAST ? `${last.sender}: ` : "") + last.content;
   };
   sidebar.replaceChildren(
