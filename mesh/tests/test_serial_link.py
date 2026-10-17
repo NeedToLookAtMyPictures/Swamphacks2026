@@ -31,11 +31,12 @@ except ImportError:  # pragma: no cover
 class FakeEsp32Pair:
     """Two fake bridges sharing one fake radio channel, mirroring the firmware's behaviour."""
 
-    def __init__(self):
+    def __init__(self, ports=(0, 0)):
+        """ports: TCP ports to listen on (0 = any free port). Reusing a port simulates a replug."""
         self.boards = []
         self.frame_sizes = []  # every payload handed to the radio, to check the 250-byte limit
-        for i in range(2):
-            srv = socket.create_server(("127.0.0.1", 0))
+        for i, port in enumerate(ports):
+            srv = socket.create_server(("127.0.0.1", port))
             self.boards.append({"srv": srv, "port": f"socket://127.0.0.1:{srv.getsockname()[1]}",
                                 "mac": bytes([2, 0, 0, 0, 0, i]), "partner": 0, "radio": True,
                                 "conn": None, "connected": threading.Event()})
@@ -120,14 +121,12 @@ class SerialLinkTests(unittest.TestCase):
 
     def test_survives_unplug_and_reconnects(self):
         """Unplugging the board must not crash the host; replugging restores the link."""
-        import tempfile
-
-        tmp = tempfile.mkdtemp()
-        path = os.path.join(tmp, "board")  # stands in for the /dev/serial/by-id/... symlink
         fake = FakeEsp32Pair()
-        os.symlink(fake.boards[0]["port"], path)
+        url = fake.boards[0]["port"]  # same address before and after, like a /dev/serial/by-id path
+        tcp_port = int(url.rsplit(":", 1)[1])
         logs = []
-        link = EspNowSerialLink(path, log=lambda *a: logs.append(" ".join(map(str, a))), reconnect_interval=0.1)
+        link = EspNowSerialLink(url, log=lambda *a: logs.append(" ".join(map(str, a))), reconnect_interval=0.1)
+        fake2 = None
         try:
             link.set_partner(7)
             deadline = time.time() + 2
@@ -135,11 +134,9 @@ class SerialLinkTests(unittest.TestCase):
                 time.sleep(0.02)
             self.assertIsNotNone(link.mac)
 
-            # Unplug: the board's end of the cable disappears.
+            # Unplug: the board's end of the connection disappears.
             fake.close()
-            os.close(fake.boards[0]["fd"])
-            os.unlink(path)
-            deadline = time.time() + 2
+            deadline = time.time() + 3
             while link.connected and time.time() < deadline:
                 link.send(b"\x00" * 20)  # writes while unplugged must not raise
                 time.sleep(0.02)
@@ -147,21 +144,21 @@ class SerialLinkTests(unittest.TestCase):
             link.send(b"\x00" * 20)
             self.assertGreater(link.dropped_writes, 0)
 
-            # Replug: a board appears at the same path again.
-            fake2 = FakeEsp32Pair()
-            os.symlink(fake2.boards[0]["port"], path)
+            # Replug: a board appears at the same address again.
+            fake2 = FakeEsp32Pair(ports=(tcp_port, 0))
             link.mac = None
             deadline = time.time() + 3
             while (not link.connected or link.mac is None) and time.time() < deadline:
                 time.sleep(0.02)
             self.assertTrue(link.connected)
             self.assertEqual(link.mac, fake2.boards[0]["mac"])
+            time.sleep(0.1)
             self.assertEqual(fake2.boards[0]["partner"], 7, "partner filter must be restored after reconnect")
             self.assertTrue(any("reconnected" in line for line in logs))
-            fake2.close()
         finally:
             link.close()
-
+            if fake2 is not None:
+                fake2.close()
 
 if __name__ == "__main__":
     unittest.main()

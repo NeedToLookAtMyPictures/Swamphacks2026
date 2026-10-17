@@ -75,10 +75,10 @@ class EspNowSerialLink(Link):
     def __init__(self, port: str, baud: int = 460800, log=print, reconnect_interval: float = 1.0):
         import serial  # pyserial; imported here so the simulator works without it
 
-        # serial_for_url takes a device name ("COM3", "/dev/ttyUSB0") or a pyserial
-        # URL such as "socket://127.0.0.1:5000", which the tests use for a fake ESP32.
-        self._ser = serial.serial_for_url(port, baud, timeout=0.05)
-        self._rx: queue.Queue[RxFrame] = queue.Queue()
+        self._serial = serial
+        self.port = port
+        self.baud = baud
+        self.reconnect_interval = reconnect_interval
         self._log = log
         self._lock = threading.RLock()
         self._ser = None
@@ -104,7 +104,9 @@ class EspNowSerialLink(Link):
             self._log(*msg)
 
     def _open(self) -> None:
-        ser = self._serial.Serial(self.port, self.baud, timeout=0.05)
+        # serial_for_url takes a device name ("COM3", "/dev/ttyUSB0") or a pyserial
+        # URL such as "socket://127.0.0.1:5000", which the tests use for a fake ESP32.
+        ser = self._serial.serial_for_url(self.port, self.baud, timeout=0.05)
         with self._lock:
             self._ser = ser
         # Clear any partner filter left over from an interrupted session, restore
