@@ -1,12 +1,11 @@
-// Global trails (from the server, as GPX) are always drawn on the map.
-// Settings > Trails lists them; selecting one highlights it and zooms to it.
+// Global trails (from the server, as GPX). Only the trail selected in
+// Settings > Trails is drawn on the map; selecting one also zooms to it.
 
 let globalTrails = [];      // rows from /api/global/trails: {id, name, description, segments, length_km}
 let trailsLayer = null;
 let selectedTrailId = null;
 
-const TRAIL_COLOR = "#6d4c41";
-const SELECTED_TRAIL_COLOR = "#ff6f00";
+const TRAIL_COLOR = "#ff6f00";
 
 function formatTrailLength(km) {
   return `${(km * 0.621371).toFixed(1)} mi (${km.toFixed(1)} km)`;
@@ -21,18 +20,12 @@ async function loadTrails() {
 
 function drawTrails() {
   if (trailsLayer) map.removeLayer(trailsLayer);
-  // Selected trail last, so it's drawn on top
-  const ordered = [...globalTrails].sort((a, b) =>
-    (a.id === selectedTrailId) - (b.id === selectedTrailId));
-  trailsLayer = L.layerGroup(ordered.flatMap((t) => {
-    const selected = t.id === selectedTrailId;
-    // A white casing under the line keeps it visible on any background
-    const casing = L.polyline(t.segments, { pane: "trails", color: "#fff", weight: selected ? 10 : 7,
-                                            opacity: 0.9, interactive: false });
-    const line = L.polyline(t.segments, { pane: "trails", color: selected ? SELECTED_TRAIL_COLOR : TRAIL_COLOR,
-                                          weight: selected ? 6 : 4, interactive: false });
-    return [casing, line];
-  })).addTo(map);
+  const trail = globalTrails.find((t) => t.id === selectedTrailId);
+  // A white casing under the line keeps it visible on any background
+  trailsLayer = L.layerGroup(trail ? [
+    L.polyline(trail.segments, { pane: "trails", color: "#fff", weight: 10, opacity: 0.9, interactive: false }),
+    L.polyline(trail.segments, { pane: "trails", color: TRAIL_COLOR, weight: 6, interactive: false }),
+  ] : []).addTo(map);
 }
 
 function selectTrail(id) {

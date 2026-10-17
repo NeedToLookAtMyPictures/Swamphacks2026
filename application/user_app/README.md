@@ -137,7 +137,7 @@ Tests: `python -m unittest test_database`
 - **Messages**: a sidebar with one conversation per person you've messaged with, with Everyone pinned to the top; click one to see its history and send to that person. The New chat dropdown lists everyone in your GPS data (newest first), or Other to type any name
 - **Map**: offline Leaflet map. The gear button opens Settings:
   - **Last known location**: search people and check who to pin, with their name and when they were last seen
-  - **Trails**: the global trails are always drawn; select one (with search) to highlight it and zoom to it
+  - **Trails**: select a global trail (with search) to draw it on the map and zoom to it; only the selected trail is shown
   - **Locales**: the global locales (shown by default), grouped by category; show or hide a whole category or single locales, with search
   - Clicking a global locale shrinks the map to the top half and opens a panel below it with information about the site (description, coordinates, distance from your last location, comment count) and its comments, newest first, with a box to add one. Comments are user `locales` records with `location` set to the site's id, so they sync like other records
 - **Debug**: shows every table in the local and global databases (refresh button; offers to create the device if it has no identity yet)
