@@ -318,7 +318,8 @@ main {
   cursor: pointer;
 }
 
-.settings-item:hover, .settings-person:hover { background: #e8efe9; }
+.settings-item:hover, .settings-person:hover,
+.settings-category:hover, .settings-locale:hover { background: #e8efe9; }
 
 .settings-header {
   display: flex;
@@ -339,7 +340,7 @@ main {
 
 .settings-back:hover { background: #e8efe9; }
 
-#last-known-search {
+#last-known-search, #locales-search {
   width: 100%;
   padding: 6px 8px;
   font: inherit;
@@ -347,7 +348,7 @@ main {
   border-radius: 4px;
 }
 
-#last-known-list {
+#last-known-list, #locales-list {
   max-height: 240px;
   overflow-y: auto;
   margin-top: 6px;
@@ -367,3 +368,41 @@ main {
 .settings-person-time { display: block; font-size: 13px; color: #666; }
 .settings-empty { margin: 6px 4px; color: #888; font-size: 14px; }
 .pin-label { text-align: center; font-size: 12px; opacity: 1 !important; }  /* solid, so overlapped labels stay readable */
+
+.settings-actions { display: flex; gap: 6px; margin-top: 6px; }
+
+.settings-actions button {
+  flex: 1;
+  padding: 4px 8px;
+  border: 1px solid #bbb;
+  border-radius: 4px;
+  background: #fff;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.settings-category, .settings-locale {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.settings-category { margin-top: 4px; font-weight: 600; }
+.settings-locale { padding-left: 26px; font-size: 14px; }
+.settings-category-name { flex: 1; }
+.settings-count { font-size: 12px; font-weight: normal; color: #666; }
+
+.settings-dot {
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3);
+}
+
+.debug-db-title { margin: 28px 0 0; font-size: 17px; }

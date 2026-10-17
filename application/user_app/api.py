@@ -19,6 +19,12 @@ Reading
 Syncing with another device or the server
     GET    /api/sync?since=<time>           everything this device shares
     POST   /api/sync                        merge records {locales: [...], messages: [...], ...}
+
+Global data (set by the company, synced from the server; users can't change it)
+    GET    /api/global/locales?category=    water sources, campsites, ...
+    GET    /api/global/categories           each category with its count
+    GET    /api/global/sync                 {server_time, synced_at} of the last server sync
+    POST   /api/global/sync                 from the server: {server_time, full?, locales: [...]}
 """
 
 import sqlite3
@@ -34,6 +40,10 @@ IMMUTABLE_DEVICE_FIELDS = {"device_id", "name", "time_created", "next_seq"}
 
 def db():
     return current_app.config["DATABASE"]
+
+
+def global_db():
+    return current_app.config["GLOBAL_DATABASE"]
 
 
 def body(*required):
@@ -164,3 +174,25 @@ def merge():
     if unknown:
         raise ValueError(f"unknown tables: {', '.join(sorted(unknown))}")
     return jsonify(merged=db().merge(data))
+
+
+# -- global data -------------------------------------------------------------------------
+
+@api.get("/global/locales")
+def global_locales():
+    return jsonify(global_db().locales(request.args.get("category")))
+
+
+@api.get("/global/categories")
+def global_categories():
+    return jsonify(global_db().categories())
+
+
+@api.get("/global/sync")
+def global_sync_state():
+    return jsonify(global_db().sync_state())
+
+
+@api.post("/global/sync")
+def global_sync():
+    return jsonify(global_db().sync(body("server_time")))

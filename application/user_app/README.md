@@ -94,10 +94,44 @@ All endpoints take and return JSON. Full list in `api.py`.
 curl -X POST localhost:5000/api/device -H 'content-type: application/json' -d '{"name": "Jordan"}'
 ```
 
+### Global database
+
+`global_database.py` keeps a second SQLite database at `data/global.db`
+(git-ignored) for data set by the company and synced from the server. Users
+never change it: the only writer is the server sync.
+
+| Table | Key | Notes |
+|---|---|---|
+| `global_locales` | id | fixed places: `category` (water, campsite, ...), `name`, `latitude`, `longitude`, `description`, `time_updated` |
+| `global_sync` | single row | `server_time` of the last sync (send back as `since`), `synced_at` |
+
+A global locale's `id` is what user `locales` records (reviews/comments) put in
+their `location`.
+
+The server sends `POST /api/global/sync` with
+`{server_time, full?, locales: [...]}`. With `full: true` everything is
+replaced; otherwise each locale is added or updated (if its `time_updated` is
+not older than ours), and one with `"deleted": true` is removed.
+
+Until the server exists, load a file in the same format:
+
+```bash
+python global_database.py load sample_global_locales.json
+```
+
+| Method | Path | What it does |
+|---|---|---|
+| GET | `/api/global/locales?category=` | global locales, sorted by category then name |
+| GET | `/api/global/categories` | each category with its count |
+| GET | `/api/global/sync` | when the global data was last synced |
+| POST | `/api/global/sync` | apply data from the server |
+
 Tests: `python -m unittest test_database`
 
 ## Tabs
 
 - **Messages**: a sidebar with one conversation per person you've messaged with, with Everyone pinned to the top; click one to see its history and send to that person. The New chat dropdown lists everyone in your GPS data (newest first), or Other to type any name
-- **Map**: offline Leaflet map
-- **Debug**: shows every table in the local database (refresh button; offers to create the device if it has no identity yet)
+- **Map**: offline Leaflet map. The gear button opens Settings:
+  - **Last known location**: search people and check who to pin, with their name and when they were last seen
+  - **Locales**: the global locales (shown by default), grouped by category; show or hide a whole category or single locales, with search
+- **Debug**: shows every table in the local and global databases (refresh button; offers to create the device if it has no identity yet)

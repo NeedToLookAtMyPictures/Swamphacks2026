@@ -22,6 +22,11 @@ function showSettingsView(name) {
     search.value = "";
     loadLastKnown().then(() => search.focus());
   }
+  if (name === "locales") {
+    const search = document.getElementById("locales-search");
+    search.value = "";
+    loadGlobalLocales().then(() => search.focus());
+  }
 }
 
 function timeAgo(seconds) {
@@ -122,6 +127,7 @@ function initMapSettings() {
   panel.querySelectorAll("[data-open]").forEach((b) =>
     b.addEventListener("click", () => showSettingsView(b.dataset.open)));
   document.getElementById("last-known-search").addEventListener("input", renderLastKnownList);
+  initGlobalLocales();
 
   // Keep the map from panning/zooming when interacting with the menu
   const container = document.getElementById("map-settings");
@@ -132,4 +138,5 @@ function initMapSettings() {
 // Refresh pins that are on, e.g. when coming back to the Map tab
 function refreshMapSettings() {
   if (lastKnownShown.size) loadLastKnown();
+  loadGlobalLocales();
 }

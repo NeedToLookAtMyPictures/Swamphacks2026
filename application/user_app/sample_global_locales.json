@@ -1,0 +1,11 @@
+{
+  "_comment": "Sample global data for testing, in the format the server sends. Load with: python global_database.py load sample_global_locales.json",
+  "locales": [
+    {"id": "water-1", "category": "water", "name": "Lake Alice spigot", "latitude": 29.6436, "longitude": -82.3612, "description": "Potable tap by the boardwalk", "time_updated": 1792000000},
+    {"id": "water-2", "category": "water", "name": "Bivens Arm pump", "latitude": 29.6262, "longitude": -82.3416, "description": "Hand pump; filter before drinking", "time_updated": 1792000000},
+    {"id": "water-3", "category": "water", "name": "Depot Park fountain", "latitude": 29.6436, "longitude": -82.3195, "description": "Seasonal", "time_updated": 1792000000},
+    {"id": "camp-1", "category": "campsite", "name": "Sweetwater camp", "latitude": 29.6208, "longitude": -82.3300, "description": "6 sites, fire ring", "time_updated": 1792000000},
+    {"id": "camp-2", "category": "campsite", "name": "Hogtown Creek camp", "latitude": 29.6650, "longitude": -82.3820, "description": "Primitive, 3 sites", "time_updated": 1792000000},
+    {"id": "shelter-1", "category": "shelter", "name": "Loblolly shelter", "latitude": 29.6560, "longitude": -82.3900, "description": "Covered, sleeps 8", "time_updated": 1792000000}
+  ]
+}

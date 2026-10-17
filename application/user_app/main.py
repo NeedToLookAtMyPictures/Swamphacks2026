@@ -12,6 +12,7 @@ from flask import Flask, render_template, send_file
 
 from api import api
 from database import Database
+from global_database import GlobalDatabase
 from download_locales import DEFAULT_BBOX, MAP_FILE, MAP_INFO_FILE
 
 
@@ -21,6 +22,7 @@ from download_locales import DEFAULT_BBOX, MAP_FILE, MAP_INFO_FILE
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
 app.config["DATABASE"] = Database()
+app.config["GLOBAL_DATABASE"] = GlobalDatabase()
 app.register_blueprint(api)
 
 

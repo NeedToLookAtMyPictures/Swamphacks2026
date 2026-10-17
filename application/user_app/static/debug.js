@@ -1,7 +1,9 @@
 // Debug tab: shows everything in the local database via the /api endpoints.
 
 const DEBUG_TABLES = ["messages", "locales", "geolocations", "tombstones"];
-const TIME_FIELDS = new Set(["time_created", "time_received", "last_server_sync"]);
+const GLOBAL_DEBUG_TABLES = { global_locales: "/api/global/locales", global_sync: "/api/global/sync" };
+const TIME_FIELDS = new Set(["time_created", "time_received", "last_server_sync",
+                             "time_updated", "server_time", "synced_at"]);
 
 function el(tag, text, className) {
   const node = document.createElement(tag);
@@ -75,6 +77,8 @@ async function loadDebug() {
     const deviceRes = await fetch("/api/device");
     const tables = await Promise.all(
       DEBUG_TABLES.map((t) => fetch(`/api/${t}`).then((r) => r.json())));
+    const globalTables = await Promise.all(
+      Object.values(GLOBAL_DEBUG_TABLES).map((url) => fetch(url).then((r) => r.json())));
 
     content.replaceChildren();
     if (deviceRes.ok) {
@@ -83,6 +87,11 @@ async function loadDebug() {
       renderDeviceSetup(content);
     }
     DEBUG_TABLES.forEach((t, i) => content.appendChild(renderTable(t, tables[i])));
+    content.appendChild(el("h2", "Global database (from the server, read-only)", "debug-db-title"));
+    Object.keys(GLOBAL_DEBUG_TABLES).forEach((t, i) => {
+      const rows = globalTables[i];
+      content.appendChild(renderTable(t, Array.isArray(rows) ? rows : [rows]));
+    });
     status.textContent = `Updated ${new Date().toLocaleTimeString()}`;
   } catch (err) {
     status.textContent = `Error: ${err.message}`;

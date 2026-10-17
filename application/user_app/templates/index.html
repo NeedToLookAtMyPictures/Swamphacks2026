@@ -50,6 +50,7 @@
           <div class="settings-view" data-view="menu">
             <div class="settings-title">Settings</div>
             <button class="settings-item" type="button" data-open="last-known">Last known location <span>&rsaquo;</span></button>
+            <button class="settings-item" type="button" data-open="locales">Locales <span>&rsaquo;</span></button>
           </div>
           <div class="settings-view" data-view="last-known" hidden>
             <div class="settings-header">
@@ -58,6 +59,18 @@
             </div>
             <input id="last-known-search" type="search" placeholder="Search people" autocomplete="off">
             <div id="last-known-list"></div>
+          </div>
+          <div class="settings-view" data-view="locales" hidden>
+            <div class="settings-header">
+              <button class="settings-back" type="button" data-open="menu" aria-label="Back">&lsaquo;</button>
+              <span class="settings-title">Locales</span>
+            </div>
+            <input id="locales-search" type="search" placeholder="Search locales" autocomplete="off">
+            <div class="settings-actions">
+              <button id="locales-show-all" type="button">Show all</button>
+              <button id="locales-hide-all" type="button">Hide all</button>
+            </div>
+            <div id="locales-list"></div>
           </div>
         </div>
       </div>
@@ -79,6 +92,7 @@
   <script src="{{ url_for('static', filename='messages.js') }}"></script>
   <script src="{{ url_for('static', filename='debug.js') }}"></script>
   <script src="{{ url_for('static', filename='map-settings.js') }}"></script>
+  <script src="{{ url_for('static', filename='global-locales.js') }}"></script>
   <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
 </html>
