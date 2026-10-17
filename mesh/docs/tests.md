@@ -68,6 +68,21 @@ it applies the partner filter, the radio on/off state and GET_INFO. **It's a
 Python model of the firmware, not the firmware itself**, so it can't catch
 bugs in the `.ino` file.
 
+## test_app_integration.py (web API + mesh on one database)
+
+Needs Flask (`pip install -r application/user_app/requirements.txt`); skipped without it.
+Two app instances (alice, bob), each with its own Flask API, app database and
+mesh node on the simulated radio. Data goes in and comes out **only through the
+HTTP API the web interface uses**.
+
+| Test | Proves |
+|---|---|
+| `test_message_posted_in_one_app_appears_in_the_other_and_is_delivered` | `POST /api/messages` on alice, then the mesh, then `GET /api/messages` on bob shows it. Bob's app marks it delivered, the tombstone comes back over the mesh, alice's copy turns `is_dead`, and `on_delivered` fires. |
+| `test_locale_comment_and_position_reach_the_peer` | A locale comment (`POST /api/locales`) and a position (`PUT /api/location`) from alice show up in bob's `/api/locales` and `/api/contacts` |
+
+Sabotaging the mesh (`AppStore.has` always True, so nothing is ever requested)
+makes both tests fail.
+
 ## Not covered by any test
 
 - The actual firmware (needs hardware)
