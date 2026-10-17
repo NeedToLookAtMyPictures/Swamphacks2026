@@ -18,10 +18,11 @@
     <section id="messages" class="panel active">
       <aside id="chat-sidebar">
         <form id="new-chat">
-          <input id="new-chat-name" list="contact-list" placeholder="New chat: type a name"
-                 pattern="[A-Za-z0-9_\-]{1,32}" autocomplete="off" required>
+          <select id="new-chat-to" required></select>
+          <input id="new-chat-name" list="contact-list" placeholder="Type a name"
+                 pattern="[A-Za-z0-9_\-]{1,32}" autocomplete="off" hidden>
           <datalist id="contact-list"></datalist>
-          <button>+</button>
+          <button id="new-chat-go" hidden>Start</button>
         </form>
         <div id="chat-list"></div>
       </aside>

@@ -5,6 +5,7 @@ let myName = null;
 let selected = null;   // receiver of the open conversation: BROADCAST or a name
 
 const BROADCAST = "*";        // receiver for messages to everyone
+const OTHER = "__other__";    // "New chat" dropdown value that reveals the free-text box
 
 const sameName = (a, b) => a.toLowerCase() === b.toLowerCase();
 
@@ -53,6 +54,7 @@ function renderMessage(m) {
 
 let lastMessages = [];
 let lastPeople = [];
+let lastSeen = new Map();  // lowercase name -> time of their latest GPS position
 
 async function loadMessages() {
   const list = document.getElementById("message-list");
@@ -71,7 +73,11 @@ async function loadMessages() {
     fetch("/api/geolocations").then((r) => r.json()),
   ]);
 
-  // Suggestions for the "New chat" box: everyone this device knows about
+  const others = gps.filter((g) => !sameName(g.user, myName));
+  fillNewChat(others);
+  lastSeen = new Map(others.map((g) => [g.user.toLowerCase(), g.time_created]));
+
+  // Suggestions for the "Type a name" box: everyone this device knows about
   const options = document.getElementById("contact-list");
   options.replaceChildren(...contacts.map((c) => {
     const option = msgEl("option");
@@ -122,7 +128,10 @@ function render() {
   };
   const previewOf = (who) => {
     const last = lastMessages.filter((m) => inConversation(m, who)).at(-1);
-    if (!last) return "No messages yet";
+    if (!last) {
+      const seen = who !== BROADCAST && lastSeen.get(who.toLowerCase());
+      return seen ? `Seen ${new Date(seen * 1000).toLocaleString()}` : "No messages yet";
+    }
     return (sameName(last.sender, myName) ? "You: " : who === BROADCAST ? `${last.sender}: ` : "") + last.content;
   };
   sidebar.replaceChildren(
@@ -144,17 +153,63 @@ function openChat(who) {
   render();
 }
 
+// "New chat" dropdown: everyone in the GPS table (newest position first), or Other
+function fillNewChat(people) {
+  const select = document.getElementById("new-chat-to");
+  const previous = select.value;
+  const option = (value, label) => {
+    const o = msgEl("option", label);
+    o.value = value;
+    return o;
+  };
+  const sorted = [...people].sort((a, b) => b.time_created - a.time_created);
+  const placeholder = option("", "New chat…");
+  placeholder.disabled = true;
+  select.replaceChildren(
+    placeholder,
+    ...sorted.map((g) => option(g.user,
+      `${g.user} (seen ${new Date(g.time_created * 1000).toLocaleString()})`)),
+    option(OTHER, "Other (type a name)…"),
+  );
+  // Keep the current choice across refreshes if it's still there
+  select.value = [...select.options].some((o) => o.value === previous && previous) ? previous : "";
+  toggleOther();
+}
+
+function toggleOther() {
+  const other = document.getElementById("new-chat-name");
+  other.hidden = document.getElementById("new-chat-to").value !== OTHER;
+  other.required = !other.hidden;
+  document.getElementById("new-chat-go").hidden = other.hidden;
+}
+
+document.getElementById("new-chat-to").addEventListener("change", () => {
+  const select = document.getElementById("new-chat-to");
+  if (select.value === OTHER) {
+    toggleOther();
+    document.getElementById("new-chat-name").focus();
+  } else if (select.value) {
+    startChat(select.value);  // picking someone from GPS opens their chat right away
+  }
+});
+
 document.getElementById("new-chat").addEventListener("submit", (e) => {
   e.preventDefault();
   const input = document.getElementById("new-chat-name");
-  const name = input.value.trim();
-  if (!name) return;
+  startChat(input.value.trim());
+});
+
+function startChat(name) {
+  const select = document.getElementById("new-chat-to");
+  const input = document.getElementById("new-chat-name");
+  select.value = "";
   input.value = "";
-  if (sameName(name, myName)) return;
+  toggleOther();
+  if (!name || sameName(name, myName)) return;
   const existing = lastPeople.find((p) => sameName(p, name));
   if (!existing) lastPeople.unshift(name);
   openChat(existing || name);
-});
+}
 
 document.getElementById("compose").addEventListener("submit", async (e) => {
   e.preventDefault();

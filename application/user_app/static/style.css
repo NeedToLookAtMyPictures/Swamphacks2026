@@ -125,12 +125,15 @@ main {
 
 #new-chat {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   padding: 8px;
   border-bottom: 1px solid #ddd;
 }
 
-#new-chat input {
+#new-chat [hidden] { display: none; }
+
+#new-chat select, #new-chat input {
   flex: 1;
   min-width: 0;
   padding: 6px 8px;
@@ -139,6 +142,8 @@ main {
   border: 1px solid #bbb;
   border-radius: 4px;
 }
+
+#new-chat select { flex-basis: 100%; }
 
 #new-chat button, #compose button {
   padding: 6px 14px;
