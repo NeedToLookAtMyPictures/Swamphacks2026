@@ -1,21 +1,85 @@
 {
-  "_comment": "Example global data in the format the server sends. Places are real Gainesville parks, but the amenities, descriptions and trail routes are made up / approximate for testing. Trails here use gpx_file (relative to this file); the server sends the GPX text as gpx. Load with: python global_database.py load sample_global_locales.json",
+  "_comment": "Example global data in the format the server sends. Places are real Gainesville parks, but the amenities, descriptions and trail routes are made up / approximate for testing. Trails here use gpx_file (relative to this file); the server sends the GPX text as gpx. Hawthorne-trail locales are fictional and snapped onto the track in sample_trails/Gainesville-Hawthorne_State_Trail.gpx. Load with: python global_database.py load sample_global_locales.json",
   "locales": [
     {
-      "id": "water-lake-alice",
+      "id": "water-depot-park-fountain",
       "category": "water",
-      "name": "Lake Alice spigot",
-      "latitude": 29.6436,
-      "longitude": -82.3612,
-      "description": "Potable tap by the boardwalk"
+      "name": "Depot Park trailhead fountain",
+      "latitude": 29.639433,
+      "longitude": -82.320599,
+      "description": "Bottle-fill fountain at the western trailhead; potable"
     },
     {
-      "id": "water-bivens-arm",
+      "id": "water-boulware-springs",
       "category": "water",
-      "name": "Bivens Arm hand pump",
-      "latitude": 29.6262,
-      "longitude": -82.3416,
-      "description": "Hand pump; filter before drinking"
+      "name": "Boulware Springs spigot",
+      "latitude": 29.62037,
+      "longitude": -82.309059,
+      "description": "Spigot behind the restroom building; potable, may be off in winter"
+    },
+    {
+      "id": "camp-prairie-rim",
+      "category": "campsite",
+      "name": "Prairie Rim primitive site",
+      "latitude": 29.608857,
+      "longitude": -82.270288,
+      "description": "Two tent pads under live oaks overlooking the prairie; no water, pack it in"
+    },
+    {
+      "id": "water-alachua-sink-cistern",
+      "category": "water",
+      "name": "Sweetwater cistern",
+      "latitude": 29.611291,
+      "longitude": -82.249757,
+      "description": "Rain cistern with tap; untreated, filter or boil"
+    },
+    {
+      "id": "camp-prairie-creek",
+      "category": "campsite",
+      "name": "Prairie Creek bridge camp",
+      "latitude": 29.597472,
+      "longitude": -82.229757,
+      "description": "Fire ring and picnic table near the creek bridge; creek water must be treated"
+    },
+    {
+      "id": "water-rochelle-pump",
+      "category": "water",
+      "name": "Rochelle crossing hand pump",
+      "latitude": 29.595529,
+      "longitude": -82.216687,
+      "description": "Well hand pump at the County Rd 234 crossing; tested potable"
+    },
+    {
+      "id": "camp-lochloosa-pines",
+      "category": "campsite",
+      "name": "Lochloosa Pines group site",
+      "latitude": 29.598732,
+      "longitude": -82.1502,
+      "description": "Group site for up to 12, pit toilet, bear-proof food box"
+    },
+    {
+      "id": "water-lochloosa-creek",
+      "category": "water",
+      "name": "Lochloosa Creek access",
+      "latitude": 29.595035,
+      "longitude": -82.13789,
+      "description": "Natural source below the boardwalk; tannic, filter before drinking"
+    },
+    {
+      "id": "camp-hawthorne-trailhead",
+      "category": "campsite",
+      "name": "Hawthorne trailhead overflow camp",
+      "latitude": 29.587422,
+      "longitude": -82.09062,
+      "description": "Grassy overflow field near the eastern trailhead; register at the kiosk"
+    },
+    {
+      "id": "water-hawthorne-trailhead",
+      "category": "water",
+      "name": "Hawthorne trailhead spigot",
+      "latitude": 29.58741,
+      "longitude": -82.09,
+      "description": "Potable spigot next to the eastern trailhead kiosk"
     }
   ],
   "trails": [
