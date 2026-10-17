@@ -10,7 +10,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from trailmesh import Config, Node, Record, RecordStore  # noqa: E402
 from trailmesh.espnow_serial import (  # noqa: E402
-    BROADCAST, CMD_GET_INFO, CMD_RADIO, CMD_SEND, CMD_SET_PARTNER, EVT_INFO, EVT_RECV, SlipDecoder, slip_encode,
+    BROADCAST, CMD_GET_INFO, CMD_RADIO, CMD_SEND, CMD_SET_PARTNER, EVT_INFO, EVT_RECV, STATUS, SlipDecoder,
+    slip_encode,
 )
 
 try:
@@ -60,7 +61,8 @@ class FakeEsp32Pair:
                 elif m[0] == CMD_RADIO:
                     board["radio"] = bool(m[1])
                 elif m[0] == CMD_GET_INFO:
-                    os.write(board["fd"], slip_encode(bytes([EVT_INFO]) + board["mac"]))
+                    status = STATUS.pack(board["radio"], 6, 0, 0, 0, 0, 0, 0)
+                    os.write(board["fd"], slip_encode(bytes([EVT_INFO]) + board["mac"] + status))
 
     def close(self):
         self._stop = True
@@ -90,6 +92,7 @@ class SerialLinkTests(unittest.TestCase):
             self.assertTrue(b.store.has(rec.id))
             self.assertEqual(b.store.get(img.id).body, img.body)
             self.assertEqual(links[0].mac, fake.boards[0]["mac"])
+            self.assertEqual(links[0].status["channel"], 6)
         finally:
             for lk in links:
                 lk.close()
