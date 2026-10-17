@@ -32,6 +32,7 @@ function showTab(name) {
     if (!map) initMap();
     map.invalidateSize();  // Leaflet needs this after the container becomes visible
   }
+  if (name === "debug") loadDebug();
 }
 
 document.querySelectorAll(".tab").forEach((t) =>

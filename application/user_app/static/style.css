@@ -61,3 +61,52 @@ main {
   border: 1px solid #e0c36a;
   border-radius: 4px;
 }
+
+/* Debug tab */
+#debug {
+  overflow: auto;
+  padding: 12px 16px;
+  font-size: 14px;
+}
+
+.debug-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+#debug-status { color: #666; }
+
+.debug-section h3 {
+  margin: 16px 0 6px;
+  font-size: 15px;
+  font-family: ui-monospace, monospace;
+}
+
+.debug-empty { color: #888; margin: 0; }
+
+.debug-table-wrap { overflow-x: auto; }
+
+#debug table {
+  border-collapse: collapse;
+  background: #fff;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+}
+
+#debug th, #debug td {
+  border: 1px solid #ddd;
+  padding: 4px 8px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+#debug th { background: #e8efe9; }
+
+#debug tr.dead td {
+  color: #999;
+  text-decoration: line-through;
+}
+
+.debug-form { display: flex; gap: 8px; }

@@ -84,3 +84,4 @@ Tests: `python -m unittest test_database`
 
 - **Messages**: blank for now
 - **Map**: offline Leaflet map
+- **Debug**: shows every table in the local database (refresh button; offers to create the device if it has no identity yet)

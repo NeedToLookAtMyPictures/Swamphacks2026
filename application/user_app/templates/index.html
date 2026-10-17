@@ -11,6 +11,7 @@
   <nav class="tabs">
     <button class="tab active" data-tab="messages">Messages</button>
     <button class="tab" data-tab="map">Map</button>
+    <button class="tab" data-tab="debug">Debug</button>
   </nav>
 
   <main>
@@ -24,11 +25,21 @@
       {% endif %}
       <div id="leaflet-map"></div>
     </section>
+
+    <section id="debug" class="panel">
+      <div class="debug-toolbar">
+        <strong>Local database</strong>
+        <button id="debug-refresh">Refresh</button>
+        <span id="debug-status"></span>
+      </div>
+      <div id="debug-content"></div>
+    </section>
   </main>
 
   <script>window.MAP_INFO = {{ map_info | tojson }};</script>
   <script src="{{ url_for('static', filename='vendor/leaflet/leaflet.js') }}"></script>
   <script src="{{ url_for('static', filename='vendor/protomaps-leaflet/protomaps-leaflet.js') }}"></script>
+  <script src="{{ url_for('static', filename='debug.js') }}"></script>
   <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
 </html>
