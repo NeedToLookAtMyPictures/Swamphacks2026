@@ -98,6 +98,50 @@ class SerialLinkTests(unittest.TestCase):
                 lk.close()
             fake.close()
 
+    def test_survives_unplug_and_reconnects(self):
+        """Unplugging the board must not crash the host; replugging restores the link."""
+        import tempfile
+
+        tmp = tempfile.mkdtemp()
+        path = os.path.join(tmp, "board")  # stands in for the /dev/serial/by-id/... symlink
+        fake = FakeEsp32Pair()
+        os.symlink(fake.boards[0]["port"], path)
+        logs = []
+        link = EspNowSerialLink(path, log=lambda *a: logs.append(" ".join(map(str, a))), reconnect_interval=0.1)
+        try:
+            link.set_partner(7)
+            deadline = time.time() + 2
+            while link.mac is None and time.time() < deadline:
+                time.sleep(0.02)
+            self.assertIsNotNone(link.mac)
+
+            # Unplug: the board's end of the cable disappears.
+            fake.close()
+            os.close(fake.boards[0]["fd"])
+            os.unlink(path)
+            deadline = time.time() + 2
+            while link.connected and time.time() < deadline:
+                link.send(b"\x00" * 20)  # writes while unplugged must not raise
+                time.sleep(0.02)
+            self.assertFalse(link.connected)
+            link.send(b"\x00" * 20)
+            self.assertGreater(link.dropped_writes, 0)
+
+            # Replug: a board appears at the same path again.
+            fake2 = FakeEsp32Pair()
+            os.symlink(fake2.boards[0]["port"], path)
+            link.mac = None
+            deadline = time.time() + 3
+            while (not link.connected or link.mac is None) and time.time() < deadline:
+                time.sleep(0.02)
+            self.assertTrue(link.connected)
+            self.assertEqual(link.mac, fake2.boards[0]["mac"])
+            self.assertEqual(fake2.boards[0]["partner"], 7, "partner filter must be restored after reconnect")
+            self.assertTrue(any("reconnected" in line for line in logs))
+            fake2.close()
+        finally:
+            link.close()
+
 
 if __name__ == "__main__":
     unittest.main()

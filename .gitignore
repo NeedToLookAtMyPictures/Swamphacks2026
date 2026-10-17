@@ -1,7 +1,6 @@
-<<<<<<< HEAD
-*.pyc
-=======
 ### Python ###
+*.db
+
 __pycache__/
 *.py[cod]
 *$py.class
@@ -54,6 +53,7 @@ pytestdebug.log
 *.swo
 .DS_Store
 Thumbs.db
+.claude/
 
 ### Arduino / PlatformIO ###
 .pio/
@@ -75,4 +75,3 @@ arduino_secrets.h
 *.log
 *.bak
 *.orig
->>>>>>> 6dd4e1f0b6cfd7c3b722dbfb7c75e925faf737dd

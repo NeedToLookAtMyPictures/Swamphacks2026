@@ -44,7 +44,9 @@ main thread:    Node.poll() -> link.poll() empties the queue without blocking
 
 | Call | Behaviour |
 |---|---|
-| `EspNowSerialLink(port, baud=460800, log=print)` | Opens the port, starts the reader thread, **clears the partner filter, turns the radio on**, sends GET_INFO |
+| `EspNowSerialLink(port, baud=460800, log=print, reconnect_interval=1.0)` | Opens the port (raises if it doesn't exist **at startup**), starts the reader thread, **clears the partner filter, turns the radio on**, sends GET_INFO |
+| `.connected` | False while the board is unplugged |
+| `.dropped_writes` | Frames discarded while unplugged |
 | `.mac` | The board's own MAC, set once the INFO reply arrives (None until then) |
 | `.status` | Dict from the latest INFO: `radio_on, channel, last_err, tx_ok, tx_err, rx, rx_filtered, rx_dropped`. None until a reply arrives, or if the firmware is older. |
 | `request_status()` | Sends GET_INFO; `.mac` and `.status` update when the reply arrives |
@@ -72,6 +74,26 @@ shared between instances. The test suite uses them directly.
   firmware LOG lines and the status counters.
 - **The board keeps state across host restarts** (partner filter, radio on/off).
   That's why the constructor resets both.
+
+## Unplug and replug
+
+The board can disappear at any moment (cable bumped, board reset). The link
+handles this without crashing the node:
+
+1. A read or write error closes the port and sets `connected = False`. It logs
+   `[link] lost connection ...`.
+2. While disconnected, `send`/`set_radio`/`set_partner` don't raise. Frames are
+   dropped (counted in `dropped_writes`), and the protocol treats them like any
+   other radio loss: retransmits, or a session timeout.
+3. The reader thread tries to reopen the **same path** every
+   `reconnect_interval` seconds. Use the `/dev/serial/by-id/...` path, because
+   `ttyACM` numbers can change on replug.
+4. On reconnect it re-sends the **desired** state (partner filter, radio on/off),
+   because a replugged board has rebooted and forgotten both. It logs `[link] reconnected ...`.
+
+Unplugging is **not** how to simulate a hiker walking away: that leaves the
+host without a radio. Use `bulk_test.py --cut-after/--cut-for`, which switches
+the radio off while USB stays up.
 
 ## Known gaps
 
