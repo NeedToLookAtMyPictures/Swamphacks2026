@@ -300,9 +300,46 @@ main {
   border-radius: 4px;
 }
 
-#map-settings-panel[hidden], .map-setting[hidden], .map-setting-empty[hidden] { display: none; }
+#map-settings-panel [hidden] { display: none; }
 
-#map-settings-search {
+.settings-title { font-weight: 600; }
+.settings-view > .settings-title { display: block; padding: 2px 4px 6px; }
+
+.settings-item {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  padding: 8px 6px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.settings-item:hover, .settings-person:hover { background: #e8efe9; }
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.settings-back {
+  padding: 0 8px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  font-size: 22px;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.settings-back:hover { background: #e8efe9; }
+
+#last-known-search {
   width: 100%;
   padding: 6px 8px;
   font: inherit;
@@ -310,13 +347,13 @@ main {
   border-radius: 4px;
 }
 
-#map-settings-list {
+#last-known-list {
   max-height: 240px;
   overflow-y: auto;
   margin-top: 6px;
 }
 
-.map-setting {
+.settings-person {
   display: flex;
   align-items: flex-start;
   gap: 8px;
@@ -325,8 +362,7 @@ main {
   cursor: pointer;
 }
 
-.map-setting:hover { background: #e8efe9; }
-.map-setting input { margin-top: 3px; }
-.map-setting-label { display: block; font-weight: 600; }
-.map-setting-desc { display: block; font-size: 13px; color: #666; }
-.map-setting-empty { margin: 6px 4px; color: #888; font-size: 14px; }
+.settings-person input { margin-top: 3px; }
+.settings-person-name { display: block; font-weight: 600; }
+.settings-person-time { display: block; font-size: 13px; color: #666; }
+.settings-empty { margin: 6px 4px; color: #888; font-size: 14px; }

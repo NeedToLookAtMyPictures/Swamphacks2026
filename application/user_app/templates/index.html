@@ -47,8 +47,18 @@
       <div id="map-settings">
         <button id="map-settings-toggle" type="button" title="Map settings" aria-label="Map settings">&#9881;</button>
         <div id="map-settings-panel" hidden>
-          <input id="map-settings-search" type="search" placeholder="Search settings" autocomplete="off">
-          <div id="map-settings-list"></div>
+          <div class="settings-view" data-view="menu">
+            <div class="settings-title">Settings</div>
+            <button class="settings-item" type="button" data-open="last-known">Last known location <span>&rsaquo;</span></button>
+          </div>
+          <div class="settings-view" data-view="last-known" hidden>
+            <div class="settings-header">
+              <button class="settings-back" type="button" data-open="menu" aria-label="Back">&lsaquo;</button>
+              <span class="settings-title">Last known location</span>
+            </div>
+            <input id="last-known-search" type="search" placeholder="Search people" autocomplete="off">
+            <div id="last-known-list"></div>
+          </div>
         </div>
       </div>
     </section>

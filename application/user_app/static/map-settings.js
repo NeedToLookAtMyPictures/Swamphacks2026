@@ -1,15 +1,10 @@
-// Map settings: a gear button over the map that opens a searchable list of toggles.
+// Map settings: a gear button over the map that opens a menu of subtabs.
+// "Last known location" lists everyone with a known position; checking a person pins them.
 
-const mapLayers = {};  // option id -> Leaflet layer while the option is on
-
-const MAP_OPTIONS = [
-  {
-    id: "last-seen",
-    label: "Last seen location",
-    description: "Pin where each person was last seen",
-    enable: showLastSeen,
-  },
-];
+let lastKnownLayer = null;          // Leaflet layer group with the pins
+let lastKnownPeople = [];           // rows from /api/geolocations, newest first
+const lastKnownShown = new Set();   // lowercased names of people whose pin is on
+let myMapName = null;
 
 function settingsEl(tag, text, className) {
   const node = document.createElement(tag);
@@ -18,69 +13,83 @@ function settingsEl(tag, text, className) {
   return node;
 }
 
-// One pin per user in the geolocations table (only their most recent position is kept)
-async function showLastSeen() {
+function showSettingsView(name) {
+  document.querySelectorAll("#map-settings-panel .settings-view").forEach((v) => {
+    v.hidden = v.dataset.view !== name;
+  });
+  if (name === "last-known") {
+    const search = document.getElementById("last-known-search");
+    search.value = "";
+    loadLastKnown().then(() => search.focus());
+  }
+}
+
+function personLabel(name) {
+  return myMapName && name.toLowerCase() === myMapName.toLowerCase() ? `${name} (you)` : name;
+}
+
+async function loadLastKnown() {
   const [gps, deviceRes] = await Promise.all([
     fetch("/api/geolocations").then((r) => r.json()),
     fetch("/api/device"),
   ]);
-  const me = deviceRes.ok ? (await deviceRes.json()).name : null;
+  myMapName = deviceRes.ok ? (await deviceRes.json()).name : null;
+  lastKnownPeople = gps.reverse();  // the geolocations table holds only each person's latest position
+  renderLastKnownList();
+  drawLastKnownPins();
+}
 
-  return L.layerGroup(gps.map((g) => {
-    const popup = settingsEl("div");
-    const isMe = me && g.user.toLowerCase() === me.toLowerCase();
-    popup.appendChild(settingsEl("strong", isMe ? `${g.user} (you)` : g.user));
-    popup.appendChild(settingsEl("div", `Last seen ${new Date(g.time_created * 1000).toLocaleString()}`));
-    return L.marker([g.latitude, g.longitude], { title: g.user }).bindPopup(popup);
+function renderLastKnownList() {
+  const list = document.getElementById("last-known-list");
+  const q = document.getElementById("last-known-search").value.trim().toLowerCase();
+  const matches = lastKnownPeople.filter((g) => g.user.toLowerCase().includes(q));
+
+  if (!matches.length) {
+    list.replaceChildren(settingsEl("p", lastKnownPeople.length ? "No matching people"
+                                                                : "No known locations yet", "settings-empty"));
+    return;
+  }
+  list.replaceChildren(...matches.map((g) => {
+    const key = g.user.toLowerCase();
+    const row = settingsEl("label", undefined, "settings-person");
+    const checkbox = settingsEl("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = lastKnownShown.has(key);
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) lastKnownShown.add(key);
+      else lastKnownShown.delete(key);
+      drawLastKnownPins();
+    });
+    const text = settingsEl("span");
+    text.appendChild(settingsEl("span", personLabel(g.user), "settings-person-name"));
+    text.appendChild(settingsEl("span", new Date(g.time_created * 1000).toLocaleString(), "settings-person-time"));
+    row.append(checkbox, text);
+    return row;
   }));
 }
 
-const optionWanted = {};  // option id -> latest requested state, so a slow fetch can't undo a toggle
-
-async function setOption(option, on) {
-  optionWanted[option.id] = on;
-  const layer = on ? await option.enable() : null;
-  if (optionWanted[option.id] !== on) return;  // toggled again while loading
-  if (mapLayers[option.id]) map.removeLayer(mapLayers[option.id]);
-  if (layer) mapLayers[option.id] = layer.addTo(map);
-  else delete mapLayers[option.id];
+function drawLastKnownPins() {
+  if (lastKnownLayer) map.removeLayer(lastKnownLayer);
+  lastKnownLayer = L.layerGroup(lastKnownPeople
+    .filter((g) => lastKnownShown.has(g.user.toLowerCase()))
+    .map((g) => {
+      const popup = settingsEl("div");
+      popup.appendChild(settingsEl("strong", personLabel(g.user)));
+      popup.appendChild(settingsEl("div", `Last seen ${new Date(g.time_created * 1000).toLocaleString()}`));
+      return L.marker([g.latitude, g.longitude], { title: g.user }).bindPopup(popup);
+    })).addTo(map);
 }
 
 function initMapSettings() {
   const panel = document.getElementById("map-settings-panel");
-  const search = document.getElementById("map-settings-search");
-  const list = document.getElementById("map-settings-list");
 
   document.getElementById("map-settings-toggle").addEventListener("click", () => {
     panel.hidden = !panel.hidden;
-    if (!panel.hidden) search.focus();
+    if (!panel.hidden) showSettingsView("menu");
   });
-
-  const rows = MAP_OPTIONS.map((option) => {
-    const row = settingsEl("label", undefined, "map-setting");
-    const checkbox = settingsEl("input");
-    checkbox.type = "checkbox";
-    checkbox.addEventListener("change", () => setOption(option, checkbox.checked));
-    const text = settingsEl("span");
-    text.appendChild(settingsEl("span", option.label, "map-setting-label"));
-    text.appendChild(settingsEl("span", option.description, "map-setting-desc"));
-    row.append(checkbox, text);
-    return { option, row };
-  });
-  const empty = settingsEl("p", "No matching settings", "map-setting-empty");
-  list.replaceChildren(...rows.map((r) => r.row), empty);
-
-  search.addEventListener("input", () => {
-    const q = search.value.trim().toLowerCase();
-    let shown = 0;
-    rows.forEach(({ option, row }) => {
-      const match = `${option.label} ${option.description}`.toLowerCase().includes(q);
-      row.hidden = !match;
-      if (match) shown++;
-    });
-    empty.hidden = shown > 0;
-  });
-  empty.hidden = true;
+  panel.querySelectorAll("[data-open]").forEach((b) =>
+    b.addEventListener("click", () => showSettingsView(b.dataset.open)));
+  document.getElementById("last-known-search").addEventListener("input", renderLastKnownList);
 
   // Keep the map from panning/zooming when interacting with the menu
   const container = document.getElementById("map-settings");
@@ -90,5 +99,5 @@ function initMapSettings() {
 
 // Refresh pins that are on, e.g. when coming back to the Map tab
 function refreshMapSettings() {
-  MAP_OPTIONS.filter((o) => mapLayers[o.id]).forEach((o) => setOption(o, true));
+  if (lastKnownShown.size) loadLastKnown();
 }
