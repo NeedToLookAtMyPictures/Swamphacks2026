@@ -45,9 +45,16 @@ main {
 
 .panel.active { display: block; }
 
+/* Map tab: the map on top, the locale sheet (when open) below it */
+#map.panel.active {
+  display: flex;
+  flex-direction: column;
+}
+
 #leaflet-map {
+  flex: 1;
+  min-height: 0;
   width: 100%;
-  height: 100%;
 }
 
 .notice {
@@ -273,7 +280,7 @@ main {
   position: absolute;
   top: 10px;
   right: 10px;
-  z-index: 1000;
+  z-index: 1002;  /* above the locale sheet if the menu is taller than the map */
   display: flex;
   flex-direction: column;
   align-items: flex-end;
@@ -407,19 +414,16 @@ main {
 
 .debug-db-title { margin: 28px 0 0; font-size: 17px; }
 
-/* Locale sheet: covers the bottom of the map when a locale is clicked */
+/* Locale sheet: the bottom half of the Map tab when a locale is clicked */
 #locale-sheet {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 1001;
-  height: 50%;
+  flex: 0 0 50%;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   background: #fff;
-  border-radius: 12px 12px 0 0;
-  box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.25);
+  border-top: 3px solid #2e5a43;
+  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.15);
+  z-index: 1001;
 }
 
 #locale-sheet[hidden] { display: none; }

@@ -1,5 +1,5 @@
-// Locale sheet: clicking a global locale opens a panel over the bottom of the map
-// with information about the site and its comments (newest first).
+// Locale sheet: clicking a global locale opens a panel below the map (the map
+// shrinks to make room) with information about the site and its comments (newest first).
 //
 // Comments are user `locales` records (database.py) whose `location` is the
 // global locale's id, so they spread to other devices like messages do.
@@ -31,16 +31,15 @@ function openLocaleSheet(locale) {
   document.getElementById("locale-comment-text").value = "";
   document.getElementById("locale-comment-status").textContent = "";
   drawGlobalLocales();  // highlight the selected locale
-  // Center the locale in the part of the map the sheet doesn't cover
-  const sheetHeight = document.getElementById("locale-sheet").offsetHeight;
+  map.invalidateSize();  // the map just got shorter
   map.setView([locale.latitude, locale.longitude], map.getZoom(), { animate: false });
-  map.panBy([0, sheetHeight / 2], { animate: false });
   loadLocaleSheet();
 }
 
 function closeLocaleSheet() {
   sheetLocale = null;
   document.getElementById("locale-sheet").hidden = true;
+  map.invalidateSize();  // the map gets its full height back, keeping its center
   drawGlobalLocales();
 }
 
