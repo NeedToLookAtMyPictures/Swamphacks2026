@@ -37,7 +37,7 @@ function renderMessage(m) {
   const broadcast = m.receiver === BROADCAST;
   const card = msgEl("div", undefined, `message ${outgoing ? "outgoing" : "incoming"}`);
   // Messages to me are marked dead as soon as they arrive (delivered), so only
-  // grey out my own messages once they've been delivered or expired
+  // grey out my own messages once they've been received or expired
   if (m.is_dead && outgoing) card.classList.add("dead");
 
   const head = msgEl("div", undefined, "message-head");
@@ -47,18 +47,22 @@ function renderMessage(m) {
   card.appendChild(msgEl("div", m.content, "message-body"));
 
   if (m.is_dead && outgoing) {
-    card.appendChild(msgEl("div", broadcast ? "expired" : "delivered or expired", "message-note"));
+    // received: the delivered tombstone reached this device within 31 days
+    const note = broadcast ? "expired" : m.received ? "received" : "received or died";
+    card.appendChild(msgEl("div", note, "message-note"));
   }
   return card;
 }
 
 let lastMessages = [];
 let lastPeople = [];
+let lastSnapshot = null;  // JSON of the data last drawn, so refreshes skip unchanged redraws
 
 async function loadMessages() {
   const list = document.getElementById("message-list");
   const deviceRes = await fetch("/api/device");
   if (!deviceRes.ok) {
+    lastSnapshot = null;
     document.getElementById("chat-list").replaceChildren();
     document.getElementById("chat-title").textContent = "";
     list.replaceChildren(msgEl("p", "Set up this device first (Debug tab).", "message-note"));
@@ -71,6 +75,12 @@ async function loadMessages() {
     fetch("/api/contacts").then((r) => r.json()),
     fetch("/api/geolocations").then((r) => r.json()),
   ]);
+
+  // Redrawing resets the New chat dropdown and the scroll position, so skip it
+  // when nothing changed since the last refresh
+  const snapshot = JSON.stringify([myName, selected, messages, contacts, gps]);
+  if (snapshot === lastSnapshot) return;
+  lastSnapshot = snapshot;
 
   fillNewChat(gps.filter((g) => !sameName(g.user, myName)));
 
@@ -224,3 +234,29 @@ document.getElementById("compose").addEventListener("submit", async (e) => {
     status.textContent = (await res.json()).error;
   }
 });
+
+// Pick up messages that arrive or get delivered in the background (sync, other devices)
+const MESSAGES_REFRESH_MS = 3000;
+setInterval(() => {
+  if (document.getElementById("messages").classList.contains("active") && !document.hidden) {
+    loadMessages().catch(() => {});  // the local app is always reachable; try again next time
+  }
+}, MESSAGES_REFRESH_MS);
+
+// Hide/show the chats sidebar (handy on narrow phone screens); remembered per browser
+const CHATS_HIDDEN_KEY = "chatsHidden";
+
+function setChatsHidden(hidden) {
+  document.getElementById("chat-sidebar").hidden = hidden;
+  const toggle = document.getElementById("chat-sidebar-toggle");
+  toggle.setAttribute("aria-expanded", String(!hidden));
+  toggle.title = toggle.ariaLabel = hidden ? "Show chats" : "Hide chats";
+  try { localStorage.setItem(CHATS_HIDDEN_KEY, hidden ? "1" : ""); } catch {}
+}
+
+document.getElementById("chat-sidebar-toggle").addEventListener("click", () =>
+  setChatsHidden(!document.getElementById("chat-sidebar").hidden));
+
+setChatsHidden((() => {
+  try { return localStorage.getItem(CHATS_HIDDEN_KEY) === "1"; } catch { return false; }
+})());

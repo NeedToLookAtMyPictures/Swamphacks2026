@@ -27,7 +27,10 @@
         <div id="chat-list"></div>
       </aside>
       <div id="chat-view">
-        <div id="chat-title"></div>
+        <div id="chat-header">
+          <button id="chat-sidebar-toggle" type="button" aria-controls="chat-sidebar">&#9776;</button>
+          <span id="chat-title"></span>
+        </div>
         <div id="message-list"></div>
         <form id="compose">
           <textarea id="compose-content" placeholder="Message" rows="2" required></textarea>

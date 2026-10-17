@@ -8,6 +8,7 @@ from flask import Flask
 
 from api import api
 from database import Database
+from test_database import FakeServer
 from global_database import GlobalDatabase
 from trail_distance import TrailNetwork, haversine
 
@@ -102,6 +103,7 @@ class DistancesApiTest(unittest.TestCase):
         app.config["DATABASE"] = Database(Path(self.tmp.name) / "api.db")
         app.config["GLOBAL_DATABASE"] = GlobalDatabase(Path(self.tmp.name) / "global.db")
         app.register_blueprint(api)
+        FakeServer().install(app, self)
         self.client = app.test_client()
         self.client.post("/api/device", json={"name": "alice"})
 

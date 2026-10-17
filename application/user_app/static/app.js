@@ -44,5 +44,36 @@ function showTab(name) {
 document.querySelectorAll(".tab").forEach((t) =>
   t.addEventListener("click", () => showTab(t.dataset.tab)));
 
+// Enter sends a message or comment; Shift+Enter adds a new line
+["compose-content", "locale-comment-text"].forEach((id) => {
+  const box = document.getElementById(id);
+  box.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+      e.preventDefault();
+      box.form.requestSubmit();
+    }
+  });
+});
+
 loadMessages();  // Messages is the tab shown on load
 startLocationUpdates();
+
+// The global data (water sources, campsites, trails) arrives from the server
+// during sync; redraw it when a new copy lands, without reloading the page.
+const GLOBAL_CHECK_MS = 10000;
+let globalVersion;
+async function checkGlobalData() {
+  try {
+    const { version } = await fetch("/api/global/info").then((r) => r.json());
+    // Before the Map tab is first opened there's nothing drawn yet to update
+    if (map && globalVersion !== undefined && version !== globalVersion) {
+      loadGlobalLocales();
+      loadTrails();
+    }
+    globalVersion = version;
+  } catch (err) {
+    // The local app is always reachable; just try again next time
+  }
+}
+checkGlobalData();
+setInterval(checkGlobalData, GLOBAL_CHECK_MS);
