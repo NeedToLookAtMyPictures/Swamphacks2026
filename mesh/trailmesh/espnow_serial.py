@@ -69,6 +69,10 @@ class SlipDecoder:
         return frames
 
 
+class PortInUse(Exception):
+    """The serial port is locked by another program."""
+
+
 class EspNowSerialLink(Link):
     mtu = 250  # ESP-NOW v1 limit; works with every ESP-IDF version
 
@@ -106,7 +110,19 @@ class EspNowSerialLink(Link):
     def _open(self) -> None:
         # serial_for_url takes a device name ("COM3", "/dev/ttyUSB0") or a pyserial
         # URL such as "socket://127.0.0.1:5000", which the tests use for a fake ESP32.
-        ser = self._serial.serial_for_url(self.port, self.baud, timeout=0.05)
+        # exclusive=True locks the port: two programs reading one board steal each
+        # other's bytes and both see endless fake disconnects. With the lock, the
+        # second program gets a clear "in use" error instead. (Windows ports are
+        # always exclusive.)
+        try:
+            ser = self._serial.serial_for_url(self.port, self.baud, timeout=0.05, exclusive=True)
+        except self._serial.SerialException as e:
+            if "lock" in str(e).lower():
+                raise PortInUse(
+                    f"{self.port} is already open in another program (another main.py / run_node.py / "
+                    f"diagnose.py, or a serial monitor). Close it first."
+                ) from e
+            raise
         with self._lock:
             self._ser = ser
         # Clear any partner filter left over from an interrupted session, restore
@@ -138,6 +154,7 @@ class EspNowSerialLink(Link):
 
     def _read_loop(self) -> None:
         dec = SlipDecoder()
+        busy_reported = False
         while not self._stop.is_set():
             ser = self._ser
             if ser is None:
@@ -146,8 +163,14 @@ class EspNowSerialLink(Link):
                     self._open()
                     dec = SlipDecoder()
                     self._emit(f"[link] reconnected to board on {self.port}")
+                except PortInUse as e:
+                    if not busy_reported:
+                        self._emit(f"[link] {e}")
+                        busy_reported = True
                 except (OSError, self._serial.SerialException):
                     pass  # still unplugged
+                else:
+                    busy_reported = False
                 continue
             try:
                 data = ser.read(512)
