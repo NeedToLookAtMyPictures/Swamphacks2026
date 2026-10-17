@@ -72,11 +72,12 @@ class DatabaseTest(unittest.TestCase):
     def test_sender_sees_received_only_from_tombstone_within_31_days(self):
         msg = self.alice.add_message("bob", "hi")
         self.bob.merge(self.alice.export())
+        self.assertNotIn("received", self.alice.export()["messages"][0])  # local only
         self.alice.merge(self.bob.export())     # tombstone reaches alice in time
         message = self.alice.get("messages", "d-alice", msg["seq"])
         self.assertTrue(message["is_dead"])
         self.assertTrue(message["received"])
-        self.assertNotIn("received", self.alice.export()["messages"][0])  # local only
+        self.assertEqual(self.alice.export()["messages"], [])  # dead, so not shared
 
         # the tombstone reaches alice after the message is 31 days old: received or died
         late = self.alice.add_message("bob", "late")
