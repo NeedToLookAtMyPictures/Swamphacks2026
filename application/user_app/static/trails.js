@@ -30,8 +30,7 @@ function drawTrails() {
     const casing = L.polyline(t.segments, { pane: "trails", color: "#fff", weight: selected ? 10 : 7,
                                             opacity: 0.9, interactive: false });
     const line = L.polyline(t.segments, { pane: "trails", color: selected ? SELECTED_TRAIL_COLOR : TRAIL_COLOR,
-                                          weight: selected ? 6 : 4 })
-      .bindTooltip(`${t.name} · ${formatTrailLength(t.length_km)}`, { sticky: true });
+                                          weight: selected ? 6 : 4, interactive: false });
     return [casing, line];
   })).addTo(map);
 }
