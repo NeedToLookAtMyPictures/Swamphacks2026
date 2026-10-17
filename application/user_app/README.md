@@ -69,7 +69,8 @@ days. (`*` isn't a valid name, so no person can be called that.) Offline, the ap
 it has already seen, so real uniqueness has to come from the server at setup.
 
 If you have a `data/user.db` from before names replaced `user_id`, delete it. Expired messages are deleted, except on the sender's and receiver's
-devices, where they're kept (marked dead) but no longer shared.
+devices, where they're kept (marked dead). Dead messages, whether expired or
+tombstoned, are never shared; only the tombstone travels.
 
 ### API
 
