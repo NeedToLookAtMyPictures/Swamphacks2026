@@ -199,6 +199,7 @@ class SyncLoop:
     def __init__(self, db, finder, global_db=None, map_dir=None):
         self.db, self.finder, self.global_db, self.map_dir = db, finder, global_db, map_dir
         self.url = None  # the server we're connected to, if any
+        self.said_none = False  # already printed that no server answers
 
     def step(self):
         """Sync once, looking for a server first if we have none.
@@ -206,7 +207,12 @@ class SyncLoop:
         if self.url is None:
             self.url = self.finder.find()
             if self.url is None:
+                if not self.said_none:  # once, not every CHECK_EVERY
+                    print(f"No server answers (tried {self.finder.describe()}); "
+                          f"looking again every {CHECK_EVERY} seconds")
+                    self.said_none = True
                 return CHECK_EVERY
+            self.said_none = False
             print(f"Connected to {self.url} ({self.finder.current[1]})")
         try:
             merged = sync_once(self.db, self.url, self.global_db, self.map_dir)

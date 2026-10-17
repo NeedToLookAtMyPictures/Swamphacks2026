@@ -26,6 +26,7 @@ import argparse
 import ipaddress
 import logging
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -158,7 +159,8 @@ class HideRoutineRequests(logging.Filter):
     requests buries the sync and [mesh] lines. Writes and errors are still shown."""
 
     def filter(self, record):
-        message = record.getMessage()
+        # werkzeug colours some lines (304s cyan), which puts escape codes inside the quotes
+        message = re.sub(r"\x1b\[[0-9;]*m", "", record.getMessage())
         return not ('"GET ' in message and ('" 200 ' in message or '" 304 ' in message))
 
 
