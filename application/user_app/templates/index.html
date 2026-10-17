@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>User App</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='vendor/leaflet/leaflet.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <nav class="tabs">
+    <button class="tab active" data-tab="messages">Messages</button>
+    <button class="tab" data-tab="map">Map</button>
+  </nav>
+
+  <main>
+    <section id="messages" class="panel active">
+      <!-- Messages tab: intentionally blank for now -->
+    </section>
+
+    <section id="map" class="panel">
+      {% if not map_info.name %}
+      <div class="notice">No offline map downloaded. Run <code>python main.py download-map</code>.</div>
+      {% endif %}
+      <div id="leaflet-map"></div>
+    </section>
+  </main>
+
+  <script>window.MAP_INFO = {{ map_info | tojson }};</script>
+  <script src="{{ url_for('static', filename='vendor/leaflet/leaflet.js') }}"></script>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
