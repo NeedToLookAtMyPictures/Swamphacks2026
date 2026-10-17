@@ -1,123 +1,105 @@
-# store.py: RecordStore
+# store.py: the mesh's view of the app's database
 
-**Purpose.** Durable storage for records, plus the three questions the protocol
-asks about local data:
-1. Do I already have this id? (`has`)
-2. What may I offer this peer? (`inventory(cutoff)`)
-3. Is my whole set identical to theirs? (`digest`)
-
-Backed by SQLite. `RecordStore()` is in-memory; `RecordStore("trail.db")`
-persists to a file.
-
-## Tables
-
-| Table | Columns | Purpose |
-|---|---|---|
-| `records` | id, kind, origin, created, server_time, key, body, received | The records themselves. `received` (local arrival time) is written but never read. |
-| `tombstones` | id | Ids of records that were replaced, or rejected because something newer existed. Kept so we never request them again. |
-| `meta` | k, v | Holds `last_server_sync` |
-
-Index: `records(kind, key)`, used for override lookups.
-
-## API
-
-| Method | Returns | Behaviour |
-|---|---|---|
-| `has(id)` | bool | True if the id is in `records` **or** `tombstones` |
-| `get(id)` | Record or None | Only real records; tombstones return None |
-| `all(kind=None)` | list[Record] | Ordered by `created`. For the app/UI. |
-| `inventory(cutoff)` | list of (id, kind, created) | Records with `server_time == 0 or server_time > cutoff` |
-| `digest()` | 8 bytes | XOR of all record ids (cached) |
-| `put(record)` | bool | Stores the record. True only if it was new and kept. |
-| `last_server_sync` | property, int | Read and write. 0 if never set. |
-| `close()` | | Closes the DB |
-
-## `put(record)`: control flow
-
-```
-rid = record.id
-if rid in records:
-    if the incoming copy has server_time and the stored one doesn't: fill it in
-    return False                          # duplicate
-if rid in tombstones:
-    return False                          # superseded earlier; ignore forever
-if record.key is not empty:
-    old = the record with the same (kind, key), if any
-    if old exists:
-        if (old.created, old.id) > (record.created, rid):
-            tombstone rid; return False    # what we have is newer
-        delete old; tombstone old.id       # incoming is newer: replace
-insert record
-invalidate digest cache
-return True
-```
-
-Points to check against your model:
-- **Newest `created` wins.** If both have the same timestamp, the larger id
-  wins. That's arbitrary but deterministic, so every device makes the same choice.
-- **Replaced content is gone.** Only the id survives, as a tombstone. Issue #2
-  left "keep old data for record keeping?" open. Keeping history would mean
-  moving old rows to an archive table instead of deleting them.
-- **The incoming record's `server_time` is kept as is**, including when the
-  record came from a peer and not from the server (see the assumptions below).
-
-## The cutoff rule (`inventory`)
-
-Issue #2: *"The earlier of the two times becomes the cutoff. Packets from before
-the cutoff are skipped, because both devices are assumed to already have them
-from the server."*
-
-What "packets from before the cutoff" means matters a lot here:
-
-- **Filtering by `created` (what the issue literally says) loses data.** Hiker
-  C writes "bridge out" on day 1 with no signal and uploads it in town on
-  day 5. Hikers A and B both synced on day 3, so cutoff = day 3. A got the
-  bridge report over the mesh. A `created < cutoff` rule skips it, but neither
-  A's nor B's server download could have contained it.
-- **The code filters by `server_time`.** A record is skipped only if the server
-  had it at or before the cutoff. Both peers downloaded from the server at or
-  after the cutoff, so both must have it. Anything the server hasn't seen
-  (`server_time == 0`) is always offered.
-
-Requirement for the server: stamp each record with `server_time` when it first
-arrives, and include that field in downloads. Then the app should:
+**Purpose.** `AppStore` connects the mesh to the app's database
+(`application/user_app/database.py`). There is **one** store per device, the
+app's. The mesh doesn't keep a copy of the data and doesn't re-implement any of
+its rules. `AppStore` only translates between app rows and mesh `Record`s.
 
 ```python
-for rec in downloaded:
-    store.put(rec)                     # rec.server_time set by server
-store.last_server_sync = download_time
+from database import Database          # the app's module
+store = AppStore(Database("data/user.db"))
+node = Node(link, store)
 ```
 
-## The digest
+The app's device must already be set up (`POST /api/device`); otherwise
+`AppStore` raises `ValueError`.
+
+## What the app decides (not the mesh)
+
+All through the app's public `Database` API:
+
+| Rule | Where in the app |
+|---|---|
+| Messages expire 31 days after `time_created`; the sender and receiver keep theirs, marked dead | `purge()` |
+| Expired messages are never shared | `export()` |
+| A tombstone marks its target message dead (`is_dead = 1`) | `merge()` |
+| A message addressed to this device creates a `delivered` tombstone | `merge()` |
+| Broadcast messages (`receiver = "*"`) are never delivered or tombstoned | `merge()` |
+| A dead message is only taken if it's ours | `merge()` |
+| Tombstones are deleted 31 days after creation | `purge()` |
+| Only the newest position per user is kept | `merge()` |
+
+## API used by the session and node
+
+| Method | Uses | Does |
+|---|---|---|
+| `inventory(cutoff)` | `export(since=cutoff)` | The manifest: `(id, kind, created)` of every record to offer, minus dead messages |
+| `has(id)` | `export()` | True if we hold the record **or** a tombstone we hold has killed it |
+| `get(id)` | `export()` | The record, to send it |
+| `put(record)` | `merge()` | Hand a peer's record to the app; True if anything changed |
+| `digest()` | `export()` | XOR of the ids of everything relayable |
+| `last_server_sync` | `get_device()` / `update_device()` | From the app's `device_info` |
+| `mesh_id` | `device_id` | The u32 used on the air (see below) |
+| `device_id` | `device_id` | The app's device id string |
+
+`has()` and `get()` read an index built from `export()`. It's rebuilt at the
+start of every session (by `inventory`), by every `digest()`, and after every
+`put()`, because the app writes to its database directly (new messages,
+positions once a minute, comments).
+
+## The sync cutoff
 
 ```
-digest = XOR over all ids in `records` (as 64-bit integers), as 8 bytes
+cutoff = min(my last_server_sync, peer's last_server_sync)
+offer only records with time_created > cutoff
 ```
 
-- It doesn't depend on order, so two devices holding the same set get the
-  same digest no matter what order the records arrived in.
-- Beacons carry it. Equal digests mean "nothing to exchange", so the session is skipped.
-- Tombstones are **not** included. Two devices with the same live records match
-  even if their tombstone lists differ.
-- It covers the whole set, not just records past the cutoff. Two devices whose
-  only difference is old server data still sync. That's harmless: INV is
-  limited by the cutoff, and the session finds nothing to send.
-- **XOR has a weakness**: the XOR of a different set can collide. That's
-  astronomically unlikely by chance, but it isn't adversary-proof. A hash of
-  the sorted ids would fix that, at the cost of rescanning on every change.
+This mirrors the app's `GET /api/sync?since=<cutoff>`. Both devices synced
+with the server after the cutoff, so both are assumed to already have
+everything older.
 
-## Assumptions
+**Open question (TODO in `inventory`):** should peer-to-peer sync be based on
+when a record was last seen by the server, or when it was created? Comparing
+creation time means a record **written offline before the cutoff but uploaded
+after it** is never offered between peers. One device has it and the other
+never gets it over the mesh, only from the server. Filtering on when the server
+received the record would fix that, but the app and server don't record that time.
 
-- **A peer's `server_time` claims are trusted.** A buggy or malicious peer
-  could set `server_time` to an old value so that other devices skip the
-  record. With no signatures, there's no way to check.
-- **Thread safety**: every call takes a lock, and the connection allows
-  cross-thread use. So the UI thread can call `put` while the node loop runs.
-- **The size of a full table scan is fine.** `digest()` and `inventory()` scan
-  the table. Thousands of rows is fine; millions is not.
+## Relaying tombstoned messages
+
+The app marks a tombstoned message dead and keeps the row until the 31-day
+purge (on the sender's and receiver's devices, for good). `export()` still
+includes it with `is_dead = 1`. **The mesh doesn't offer dead messages:**
+- a peer that holds the message already received the tombstone that killed it;
+- a peer that doesn't hold it won't store a dead message that isn't its own
+  (the app's `merge()` refuses it).
+
+So sending it would only waste airtime. Dead messages are also left out of the
+digest, so a device holding a dead copy and one that never had it still match.
+The app's rows are untouched; only what goes on the air changes.
+
+**Open question (TODO in `_relayable`):** should relays delete the tombstoned
+messages they have stored? Today they keep them, dead, until day 31, because
+that's what the app does.
+
+## Device id on the air
+
+Frames carry a u32 device id (the firmware filters on it). The app generates
+`device_id` as 8 hex digits, which is used directly (`"0000002a"` → 42). Any
+other string is hashed with CRC32. That only matters if two devices' strings
+hash to the same value.
 
 ## Known gaps
 
-- **No expiry.** Records and tombstones grow forever. You'll want a TTL per
-  kind ("water reports expire after 3 weeks") for long trips.
-- `received` is stored but never used.
+- **`digest()` and `inventory()` read the whole database** through `export()`.
+  That's fine for thousands of rows, not millions.
+- **Stale positions are requested.** A peer's older position for a user has a
+  new id, so we request it, and then the app's `merge()` discards it because
+  ours is newer. It costs a little airtime.
+
+## Assumptions
+
+- **A tombstone outlives its message.** Both last 31 days, and a tombstone is
+  always created after its message, so no device deletes a tombstone while a
+  live copy of its message can still be around to come back. This holds as
+  long as device clocks roughly agree.

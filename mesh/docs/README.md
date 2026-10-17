@@ -9,8 +9,8 @@ gaps.
 
 | Doc | Source | What it owns |
 |---|---|---|
-| [records.md](records.md) | `trailmesh/records.py` | What a piece of data is, and how its id is computed |
-| [store.md](store.md) | `trailmesh/store.py` | Persistence, the cutoff rule, overrides, the digest |
+| [records.md](records.md) | `trailmesh/records.py` | How the app's rows are carried: kinds, encoding, ids |
+| [store.md](store.md) | `trailmesh/store.py` | The link to the app's database: cutoff, tombstones, digest |
 | [wire.md](wire.md) | `trailmesh/wire.py` | Byte layout of every frame on the air |
 | [reliable.md](reliable.md) | `trailmesh/reliable.py` | ACKs, retransmission, in-order delivery |
 | [session.md](session.md) | `trailmesh/session.py` | One exchange between two devices |
@@ -25,13 +25,13 @@ gaps.
 
 ```
  Your app (UI, server sync)
-        |  node.post(record), on_record callback, node.poll()
+        |  writes to its Database; node.poll(); on_record / on_delivered callbacks
         v
  +-------------- Python (trailmesh) ------------------------------+
  | Node      duty cycle, beacons, picks a peer, owns 1 Session    |
  |  Session  HELLO -> INV -> WANT -> DATA -> DONE                 |
  |   ReliableSender / ReliableReceiver   seq, ACK, retransmit     |
- | RecordStore (SQLite)   records, tombstones, last_server_sync   |
+ | AppStore  wraps the app's Database: export / merge / purge     |
  | wire.Frame            12-byte header + payload                 |
  +---------------------------------------------------------------+
         |  Link interface: send / poll / set_radio / set_partner
@@ -76,17 +76,21 @@ interleave. The diagram shows one possible order.
 
 ## Vocabulary
 
-- **device id**: a nonzero 32-bit number per device, unique per user. The app
-  chooses it. Both the "lower id initiates" rule and the firmware filter use it.
-- **record**: one immutable piece of data (locale update, message or
-  pin). Its id is a hash of its contents.
+- **device id**: the app's `device_id` (8 hex digits). On the air it's the
+  nonzero u32 `mesh_id`. Both the "lower id initiates" rule and the firmware
+  filter use it.
+- **record**: one row of one of the app's shared tables (locale comment,
+  message, geolocation or tombstone). Its id is derived from the row's identity,
+  `(origin_id, seq)`.
+- **tombstone**: a record that kills a message everywhere it reaches. The
+  receiver's app creates a `delivered` one; the server can create others.
 - **frame**: one radio packet, at most `min(link.mtu, 250)` bytes. A record
   bigger than one frame is split into chunks across many frames.
 - **window**: the short, scheduled time when every device's radio is on for discovery.
 - **session**: one exchange with one peer, from HELLO to DONE or failure.
-- **last_server_sync**: when this device last downloaded from the server.
-- **server_time**: on a record, when the server first saw that record (0 = never).
-- **cutoff**: `min(my last_server_sync, peer's last_server_sync)`.
+- **last_server_sync**: when this device last synced with the server (the app's `device_info`).
+- **cutoff**: `min(my last_server_sync, peer's last_server_sync)`. Only records
+  created after it are exchanged.
 
 ## Checklist: confirm these match your mental model
 
@@ -100,26 +104,27 @@ Each item links to the doc that explains it.
    `[HANDSHAKE_COMMAND][DEVICE_ID]`. Here every frame, the handshake included,
    is `[DEVICE_ID][TYPE]...`, so the firmware can filter all frames the same
    way. ([wire.md](wire.md))
-4. **The cutoff uses the record's `server_time`, not its creation time.** This
-   is a deliberate change from the issue's wording. ([store.md](store.md))
-5. **Overrides apply only to records with a "supersede key".** Today that means
-   only locale updates (`locale:field`). Messages and pins are never replaced.
-   ([records.md](records.md), [store.md](store.md))
-6. **Replaced data is discarded, not archived.** The issue left this as an open
-   question. The code keeps only the id of the replaced record (a "tombstone"),
-   not its content. ([store.md](store.md))
+4. **The cutoff uses the record's creation time**, mirroring the app's
+   `GET /api/sync?since=`. Open TODO: should it use when the server last saw
+   the record instead? ([store.md](store.md))
+5. **The app's database is the only store.** The mesh moves the app's rows and
+   leaves every rule to the app's `merge()`/`export()`/`purge()`.
+   ([store.md](store.md))
+6. **Tombstoned messages are kept dead, not deleted**, until the 31-day purge,
+   because that's what the app does. The mesh stops relaying them. Open TODO:
+   should relays delete them? ([store.md](store.md))
 7. **Only the lower device id starts a session**, and a device in a session
    ignores everyone else. ([node.md](node.md))
 8. **The exchange is symmetric.** Both sides send INV, WANT and DATA. There is
    no client/server role after the handshake. ([session.md](session.md))
 9. **ACKs are TCP-like**, but the timeout is fixed (no RTT estimation) and every
    reliable frame gets its own ACK. ([reliable.md](reliable.md))
-10. **Server sync is not implemented here.** The code assumes the server stamps
-    `server_time` on records, and that the app sets `store.last_server_sync`
-    after each download. ([store.md](store.md))
+10. **Server sync is not implemented here.** The app's `last_server_sync`
+    must be updated after each server sync. ([store.md](store.md))
 11. **Time sync is not implemented here.** The `clock` you pass to `Node` must
     already be GPS- or phone-synced. ([node.md](node.md))
-12. **No expiry.** Records and tombstones are never deleted.
+12. **Messages and tombstones expire after 31 days** (the app's rule). The
+    sender and receiver keep their messages for good.
     ([store.md](store.md))
 
 ## Known gaps across files
@@ -129,6 +134,6 @@ Each one is detailed in its file's doc.
 - A device that refuses some kinds (`accept_kinds`) never matches its peer's
   digest, so it re-syncs with that peer every time the cooldown expires.
   ([node.md](node.md))
-- There is no authentication: a peer can claim any `server_time` or author id.
-  ([records.md](records.md))
+- There is no authentication: a peer can claim any sender, or tombstone anyone's
+  message. ([records.md](records.md))
 - The firmware has never been compiled. ([firmware.md](firmware.md))

@@ -2,26 +2,27 @@
 
 **Purpose.** A device on the mesh. It controls the duty cycle (when the radio is
 on), sends beacons, decides whom to exchange with, owns at most one `Session`,
-and connects the radio link to the store. Your app interacts mostly with this class.
+and connects the radio link to the app's database (through `AppStore`).
 
 ## Constructor
 
 ```python
-Node(device_id, link, store, config=None, clock=time.time,
-     position=None, on_record=None, on_session_end=None, rng=None)
+Node(link, store, config=None, clock=time.time,
+     on_record=None, on_delivered=None, on_session_end=None, rng=None)
 ```
 
 | Argument | Meaning |
 |---|---|
-| `device_id` | Nonzero u32, unique per user. Raises `ValueError` otherwise. |
 | `link` | A `Link` (`EspNowSerialLink` on hardware, `SimLink` in tests) |
-| `store` | A `RecordStore` |
+| `store` | `AppStore(Database(...))`: the app's database ([store.md](store.md)) |
 | `config` | A `Config`; defaults below |
 | `clock` | **Must return GPS- or phone-synced Unix time.** All discovery windows depend on it. |
-| `position` | Function returning `(lat, lon, heading)` or None. Used for the automatic pin. |
-| `on_record(rec)` | Called for every new record received over the mesh |
+| `on_record(rec)` | Called for every record a peer sent that changed the app's database |
+| `on_delivered(origin_id, seq)` | Called when the receiver's `delivered` tombstone for one of **our** messages reaches us (see below) |
 | `on_session_end(session)` | Called when a session finishes, successful or not. Check `session.ok`. |
 | `rng` | `random.Random`. Pass a seeded one for repeatable tests. |
+
+The node's id on the air is `store.mesh_id`, derived from the app's `device_id`.
 
 ## App-facing API
 
@@ -29,7 +30,21 @@ Node(device_id, link, store, config=None, clock=time.time,
 |---|---|
 | `node.poll(now=None)` | Does all the work. **Call every few ms.** |
 | `node.run_forever(poll_interval=0.005)` | `poll()` in a loop with a short sleep. Run it in its own thread if your app has a UI. |
-| `node.post(record)` | `store.put(record)`. The record goes out at the next encounter. |
+
+There's no "post" call. The app writes to its own database as usual
+(`add_message`, `add_locale`, `set_location`), and the node offers whatever is
+new at the next encounter. The node doesn't make location pins of its own; the
+app already saves the user's position once a minute.
+
+## Delivery receipts
+
+A sender's message is **pending** until the receiver's `delivered` tombstone
+travels back through the mesh to the sender. When it arrives, the app's
+`merge()` marks the message dead (delivered), and the node calls
+`on_delivered(origin_id, seq)`. A message still pending 31 days after
+`time_created` is **lost**. That's for the app to decide, since it holds
+`time_created`. Tombstones with another reason (for example one the server
+issues) mark the message dead but don't call `on_delivered`.
 
 ## `poll(now)`: control flow
 
@@ -85,12 +100,13 @@ else:         drop it
 
 ### When does a beacon start a session?
 
-All of these must hold:
+All of these must hold, checked in this order:
 1. The beacon's version equals `PROTOCOL_VERSION`.
-2. **Its digest differs from ours** (identical sets mean nothing to exchange).
-3. **Our id is lower than the sender's.** Only one side starts, so the two
+2. **Our id is lower than the sender's.** Only one side starts, so the two
    never send HELLO at the same time.
-4. `now >= next_allowed[peer]` (cooldown or backoff, below).
+3. `now >= next_allowed[peer]` (cooldown or backoff, below).
+4. **Its digest differs from ours** (identical sets mean nothing to exchange).
+   Checked last because computing our digest reads the app's database.
 
 The higher-id device never initiates. It waits for the lower-id device's
 HELLO. Both send beacons in every window, so the lower-id device normally
@@ -105,12 +121,8 @@ which is enough because only the initiator starts sessions.
 ## Starting and ending a session
 
 `_start_session(peer, initiator, ...)`:
-1. `_add_own_pin(now)`: if `position` is set and no pin was made in the last
-   `pin_interval` (300 s), store a fresh PIN record of our own position. This
-   is the issue's "location sharing on every handshake". The pin is in the
-   store before the INV is built, so it goes out in this session.
-2. `link.set_partner(peer)`: the firmware now drops other devices' frames.
-3. Create the `Session`. Its `send` targets the peer's MAC if we know it,
+1. `link.set_partner(peer)`: the firmware now drops other devices' frames.
+2. Create the `Session`. Its `send` targets the peer's MAC if we know it,
    otherwise it broadcasts.
 
 `_end_session(now)`:
@@ -137,15 +149,14 @@ which is enough because only the initiator starts sessions.
 | `window_frames` | 16 | Max unacked frames in flight |
 | `idle_timeout` | 4 s | Peer silent this long: session fails |
 | `linger` | 3 s | Keep ACKing a finished session's frames this long |
-| `accept_kinds` | all | Kinds we request from peers (e.g. leave PIN out to save space) |
-| `pin_interval` | 300 s | Minimum gap between automatic own-position pins |
+| `accept_kinds` | all | Kinds we request from peers (e.g. leave GEOLOCATION out to save airtime) |
 
 ## Assumptions
 
 - **Clocks are synced** to within `guard`. Nothing in this code syncs time.
   The app must feed `clock` from GPS or the phone.
-- **Device ids are unique.** Two devices with the same id would ignore each
-  other's frames as their own.
+- **Device ids are unique.** Two devices with the same `mesh_id` would ignore
+  each other's frames as their own.
 - **`poll()` is called often** (every 5 ms or so). Retransmit and beacon timing
   is only as precise as the polling.
 - **There's one radio channel.** The firmware fixes it at channel 1.
@@ -155,8 +166,9 @@ which is enough because only the initiator starts sessions.
 - **Some peer pairs loop forever.** If `accept_kinds` excludes some kinds, two
   devices' digests never match, so they run a (cheap, nothing-to-send) session
   again every `cooldown`.
-- **The cooldown is per peer and ignores new data.** If a peer posts something
-  new 10 s after a sync, it won't reach us until the 120 s cooldown expires.
+- **The cooldown is per peer and ignores new data.** If a peer writes something
+  new 10 s after a sync (including the `delivered` tombstone the sync itself
+  created), it won't reach us until the 120 s cooldown expires.
 - **A node won't start with a lower-id peer it can only hear one way.** If the
   lower-id device never hears the higher-id device's beacons, they never pair,
   even though the higher-id device hears the lower one fine.

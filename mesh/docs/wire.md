@@ -49,7 +49,8 @@ Records themselves can be any size. A record bigger than one frame is split
 into chunks, each sent as its own DATA frame:
 
 ```
-DATA frame = 12 B header | record_id 8B | chunk_index u16 | chunk_count u16 | up to 226 B of the record
+DATA frame = 12 B header | record_id 8B | chunk_index u16 | chunk_count u16 | up to 226 B of the blob
+blob       = CRC32 of the encoded record (u32) | encoded record
 ```
 
 A 1 MB record becomes 4 425 frames of at most 250 bytes. Two sequence numbers
@@ -58,8 +59,8 @@ make the reassembly lossless:
   retransmission and hands frames to the session in order
   ([reliable.md](reliable.md));
 - the **`chunk_index`** places each chunk in its record. The record is rebuilt
-  only once all `chunk_count` chunks are present, and its hash id is checked
-  ([session.md](session.md)).
+  only once all `chunk_count` chunks are present, then its CRC32 and its id
+  are checked ([session.md](session.md)).
 
 ## Capacity per frame (ESP-NOW, mtu = 250)
 
@@ -88,7 +89,8 @@ Limits that follow from the field sizes:
 
 ## Versioning
 
-`PROTOCOL_VERSION = 1` appears only in BEACON and HELLO/HELLO_ACK. Nodes ignore
+`PROTOCOL_VERSION = 2` appears only in BEACON and HELLO/HELLO_ACK. Version 2
+changed the records to mirror the app's tables and added the CRC32 to DATA. Nodes ignore
 beacons and HELLOs with a different version, so devices on mismatched versions
 just never pair. The version check covers the HELLO a responder receives, but
 the initiator doesn't check the version in HELLO_ACK.
@@ -100,6 +102,8 @@ the initiator doesn't check the version in HELLO_ACK.
   1 and 8, decodes as a frame. In practice it gets dropped anyway: beacons and
   HELLOs need a matching version byte and a minimum length, and other types
   need a matching sender and session id.
-- There's no checksum. ESP-NOW already discards corrupted frames using the
-  802.11 frame check (FCS), and complete records are verified by their id hash.
-  LoRa also has a CRC that should be left on.
+- There's no checksum per frame. ESP-NOW already discards corrupted frames
+  using the 802.11 frame check (FCS), and each reassembled record carries a
+  CRC32. LoRa also has a CRC that should be left on.
+- `last_server_sync` in BEACON and HELLO is the app's REAL value rounded down
+  to whole seconds (u32).

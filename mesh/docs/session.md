@@ -43,7 +43,7 @@ Both sides run the **same** steps after the handshake. There is no client or ser
 ### Step 1: cutoff and INV (`_activate`)
 ```
 cutoff  = min(my last_server_sync, peer's last_server_sync)
-entries = store.inventory(cutoff)     # (id, kind, created), see store.md
+entries = store.inventory(cutoff)     # records created after the cutoff, see store.md
 queue INV frames, 18 entries each; the last frame has FLAG_LAST
 (no entries: one empty INV with FLAG_LAST)
 ```
@@ -57,14 +57,16 @@ wants = [id for (id, kind, _) in peer_inv
 remember wants as _wanted     # DATA is accepted only for these ids
 queue WANT frames, 29 ids each, FLAG_LAST on the last one (possibly empty)
 ```
-`store.has` includes tombstones, so records we already replaced are never requested.
+`store.has` is also true for a message that a tombstone we hold has killed,
+so dead messages are never requested.
 
 ### Step 3: on the peer's complete WANT, send DATA, then DONE
 ```
 records = [store.get(id) for id in peer_wants], skipping ids we no longer have
 sort by (PRIORITY[kind], newest first)
-for each record: split encode() into 226-byte chunks, send DATA(id, i, count, chunk)
-    (skipped if it would need more than 65 535 chunks)
+for each record: blob = CRC32(encode()) u32 | encode()
+    split blob into 226-byte chunks, send DATA(id, i, count, chunk)
+    (skipped if it would need more than 65 535 chunks, or a field doesn't fit its encoding)
 then send DONE
 ```
 The session uses `mtu = min(link.mtu, 250)`, so every frame it builds (INV,
@@ -80,14 +82,20 @@ ignore unless record_id is in _wanted
 ignore if index >= count, or count differs from this record's first chunk
 store chunk[index]
 when all `count` chunks are present:
-    record = Record.decode(chunks 0..count-1 joined)   # malformed: drop it
-    if record.id != record_id: drop it                 # integrity check
+    blob = chunks 0..count-1 joined
+    if CRC32 doesn't match: drop it                    # integrity check
+    record = Record.decode(rest of blob)               # malformed: drop it
+    if record.id != record_id: drop it                 # not what we asked for
     if store.put(record): count it and call on_record(record)
 ```
+`store.put` hands the record to the app's `merge()`, which decides what to keep
+(and may create a `delivered` tombstone if the message is ours).
+
 The reliable layer already delivers DATA frames in order with nothing missing
 or duplicated. The chunk index and count are a second check that also covers a
-buggy or hostile peer. Because the id is a hash of the contents, a record is
-either stored complete and byte-identical or not at all.
+buggy or hostile peer. Record ids name an app row, not its contents, so a
+CRC32 over the encoded record catches corrupted bytes. A record is either
+handed to the app complete and byte-identical, or not at all.
 
 Each record is stored **as soon as its last chunk arrives**, not at the end of
 the session. Records that only partially arrived are discarded when the session

@@ -1,7 +1,7 @@
-"""Delay-tolerant gossip protocol for trail updates over ESP-NOW (LoRa later)."""
+"""Delay-tolerant epidemic protocol for trail updates over ESP-NOW (LoRa later)."""
 from .link import Link, RxFrame
 from .node import Config, Node
 from .records import Kind, Record
-from .store import RecordStore
+from .store import AppStore
 
-__all__ = ["Config", "Kind", "Link", "Node", "Record", "RecordStore", "RxFrame"]
+__all__ = ["AppStore", "Config", "Kind", "Link", "Node", "Record", "RxFrame"]

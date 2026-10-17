@@ -15,13 +15,14 @@ from __future__ import annotations
 
 import math
 import struct
+import zlib
 from collections import deque
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Callable
 
 from .records import ID_LEN, PRIORITY, Record
 from .reliable import ReliableReceiver, ReliableSender, RetriesExhausted
-from .store import RecordStore
+from .store import AppStore
 from .wire import (
     DATA_HDR,
     FLAG_LAST,
@@ -55,7 +56,7 @@ class Session:
         peer_id: int,
         session_id: int,
         initiator: bool,
-        store: RecordStore,
+        store: AppStore,
         config: Config,
         mtu: int,
         send: Callable[[Frame], None],
@@ -165,12 +166,16 @@ class Session:
             if len(chunks) == count:
                 del self._partial[rid]
                 self._wanted.discard(rid)
+                blob = b"".join(chunks[i] for i in range(count))
+                # Ids name a row, not its contents, so a CRC32 guards the bytes.
+                if len(blob) < 4 or zlib.crc32(blob[4:]) != int.from_bytes(blob[:4], "little"):
+                    return  # corrupted; drop it
                 try:
-                    rec = Record.decode(b"".join(chunks[i] for i in range(count)))
+                    rec = Record.decode(blob[4:])
                 except (struct.error, ValueError):
                     return  # malformed; drop it
                 if rec.id != rid:
-                    return  # corrupted or forged; drop it
+                    return  # not the record we asked for; drop it
                 if self.store.put(rec):
                     self.records_received += 1
                     if self._on_record:
@@ -195,7 +200,11 @@ class Session:
     def _data_frames(self, recs: list[Record]):
         size = self.mtu - HEADER.size - DATA_HDR.size
         for rec in recs:
-            blob = rec.encode()
+            try:
+                enc = rec.encode()
+            except struct.error:
+                continue  # a field too big for its length prefix (e.g. a short string over 64 KB)
+            blob = zlib.crc32(enc).to_bytes(4, "little") + enc
             count = max(1, math.ceil(len(blob) / size))
             if count > MAX_CHUNKS:
                 continue  # over ~14.8 MB on ESP-NOW; can't be indexed with a u16

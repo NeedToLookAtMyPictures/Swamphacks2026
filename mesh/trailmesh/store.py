@@ -1,126 +1,129 @@
-"""Persistent record store (SQLite)."""
+"""The mesh's view of the app's database (application/user_app/database.py).
+
+The app's `Database` is the only store on a device. It owns every rule about
+the data: message expiry (31 days), tombstones killing messages, a receiver
+tombstoning ("delivered") a message addressed to it, newest position per user.
+AppStore only translates between its rows and mesh Records, using the app's
+public API: export() to read what the device shares, merge() to apply what a
+peer sent, get_device()/update_device() for identity and last server sync.
+"""
 from __future__ import annotations
 
-import sqlite3
-import threading
-import time
+import zlib
 
-from .records import ID_LEN, Kind, Record
+from .records import ID_LEN, TABLE, Kind, Record, record_id
 
 
-class RecordStore:
-    def __init__(self, path: str = ":memory:"):
-        self._db = sqlite3.connect(path, check_same_thread=False)
-        self._lock = threading.RLock()
-        self._digest: bytes | None = None
-        with self._db:
-            self._db.executescript(
-                """
-                CREATE TABLE IF NOT EXISTS records (
-                    id BLOB PRIMARY KEY, kind INT, origin INT, created INT,
-                    server_time INT, key BLOB, body BLOB, received INT);
-                CREATE INDEX IF NOT EXISTS records_key ON records(kind, key);
-                -- ids we have seen but dropped because a newer record superseded them,
-                -- so we don't keep requesting them from peers.
-                CREATE TABLE IF NOT EXISTS tombstones (id BLOB PRIMARY KEY);
-                CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v);
-                """
-            )
+class AppStore:
+    def __init__(self, db):
+        """db: an initialized application/user_app/database.py `Database`."""
+        device = db.get_device()
+        if device is None:
+            raise ValueError("the app's device identity isn't set up yet (POST /api/device)")
+        self.db = db
+        self.device_id: str = device["device_id"]
+        self._index: dict[bytes, Record] | None = None  # id -> record, for has()/get()
+        self._dead_targets: set[bytes] = set()  # ids of messages killed by a tombstone
 
-    # Queries -----------------------------------------------------------------
+    @property
+    def mesh_id(self) -> int:
+        """The u32 the mesh uses for this device (frame sender, firmware filter).
+
+        The app generates device_id as 8 hex digits, which is used as is.
+        Any other string is hashed, which is fine as long as ids stay unique.
+        """
+        try:
+            n = int(self.device_id, 16)
+            if 0 < n < 2**32:
+                return n
+        except ValueError:
+            pass
+        return zlib.crc32(self.device_id.encode()) or 1
+
+    # Reading -------------------------------------------------------------------
+
+    def _shared(self, since: float | None = None) -> list[Record]:
+        """Everything the app would share with a peer, as Records.
+
+        export() applies the app's age rules first and leaves out expired messages.
+        """
+        data = self.db.export(since)
+        return [Record.from_row(table, row) for table in TABLE.values() for row in data.get(table, [])]
+
+    def _refresh(self) -> dict[bytes, Record]:
+        recs = self._shared()
+        self._index = {r.id: r for r in recs}
+        self._dead_targets = {
+            record_id(Kind.MESSAGE, r.data["target_origin_id"], int(r.data["target_seq"]))
+            for r in recs
+            if r.kind is Kind.TOMBSTONE
+        }
+        return self._index
+
+    def _current(self) -> dict[bytes, Record]:
+        return self._index if self._index is not None else self._refresh()
+
+    @staticmethod
+    def _relayable(rec: Record) -> bool:
+        # The app marks a tombstoned message dead (is_dead = 1) instead of deleting it,
+        # and keeps sharing it marked dead until the 31-day purge. Over the mesh a dead
+        # copy is useless: a peer that has the message already got the tombstone, and a
+        # peer that doesn't won't store a dead message that isn't its own. So the mesh
+        # stops relaying dead messages, while the app's own rows stay as the app keeps them.
+        # TODO: should relays delete the tombstoned messages they have stored
+        return not (rec.kind is Kind.MESSAGE and rec.data["is_dead"])
+
+    def inventory(self, cutoff: float) -> list[tuple[bytes, Kind, int]]:
+        """(id, kind, created) of every record to offer a peer.
+
+        Mirrors the app's GET /api/sync?since=<cutoff>: only records *created*
+        after the cutoff are offered, where cutoff = min of both devices' last
+        server sync (both got everything older from the server).
+        """
+        # TODO: should peer-to-peer sync be based on when this record was last seen by the server or when it was created
+        self._refresh()
+        recs = self._shared(cutoff or None)
+        return [(r.id, r.kind, min(int(r.created), 2**32 - 1)) for r in recs if self._relayable(r)]
 
     def has(self, rid: bytes) -> bool:
-        with self._lock:
-            return (
-                self._db.execute("SELECT 1 FROM records WHERE id=?", (rid,)).fetchone() is not None
-                or self._db.execute("SELECT 1 FROM tombstones WHERE id=?", (rid,)).fetchone() is not None
-            )
+        """True if we hold the record, or it's a message a tombstone has killed."""
+        return rid in self._current() or rid in self._dead_targets
 
     def get(self, rid: bytes) -> Record | None:
-        with self._lock:
-            row = self._db.execute(
-                "SELECT kind, origin, created, body, key, server_time FROM records WHERE id=?", (rid,)
-            ).fetchone()
-        return None if row is None else Record(Kind(row[0]), row[1], row[2], row[3], row[4], row[5])
-
-    def all(self, kind: Kind | None = None) -> list[Record]:
-        sql = "SELECT kind, origin, created, body, key, server_time FROM records"
-        args: tuple = ()
-        if kind is not None:
-            sql += " WHERE kind=?"
-            args = (int(kind),)
-        with self._lock:
-            rows = self._db.execute(sql + " ORDER BY created", args).fetchall()
-        return [Record(Kind(r[0]), r[1], r[2], r[3], r[4], r[5]) for r in rows]
-
-    def inventory(self, cutoff: int) -> list[tuple[bytes, Kind, int]]:
-        """(id, kind, created) of records eligible to exchange with a peer.
-
-        A record is skipped only if the server had it at or before the cutoff:
-        both peers synced with the server after that, so both already have it.
-        Filtering on `created` instead would wrongly skip records that were
-        written offline before the cutoff but reached the server after it.
-        """
-        with self._lock:
-            rows = self._db.execute(
-                "SELECT id, kind, created FROM records WHERE server_time=0 OR server_time>?", (cutoff,)
-            ).fetchall()
-        return [(r[0], Kind(r[1]), r[2]) for r in rows]
+        return self._current().get(rid)
 
     def digest(self) -> bytes:
-        """Order-independent fingerprint of the held set (XOR of ids).
+        """Order-independent fingerprint of the relayable set (XOR of ids).
 
         Equal digests mean two devices almost certainly hold the same records,
-        so they can skip the exchange entirely.
+        so they skip the exchange. Read fresh each time, since the app writes
+        to its database directly (new messages, positions, comments).
         """
-        with self._lock:
-            if self._digest is None:
-                acc = 0
-                for (rid,) in self._db.execute("SELECT id FROM records"):
-                    acc ^= int.from_bytes(rid, "little")
-                self._digest = acc.to_bytes(ID_LEN, "little")
-            return self._digest
+        acc = 0
+        for rid, rec in self._refresh().items():
+            if self._relayable(rec):
+                acc ^= int.from_bytes(rid, "little")
+        return acc.to_bytes(ID_LEN, "little")
 
-    # Mutations ---------------------------------------------------------------
+    # Writing -------------------------------------------------------------------
 
     def put(self, rec: Record) -> bool:
-        """Store a record. Returns True if it was new and kept."""
-        rid = rec.id
-        with self._lock, self._db:
-            row = self._db.execute("SELECT server_time FROM records WHERE id=?", (rid,)).fetchone()
-            if row is not None:
-                if rec.server_time and not row[0]:
-                    self._db.execute("UPDATE records SET server_time=? WHERE id=?", (rec.server_time, rid))
-                return False
-            if self._db.execute("SELECT 1 FROM tombstones WHERE id=?", (rid,)).fetchone():
-                return False
-            if rec.key:
-                old = self._db.execute(
-                    "SELECT id, created FROM records WHERE kind=? AND key=?", (int(rec.kind), rec.key)
-                ).fetchone()
-                if old is not None:
-                    if (old[1], old[0]) > (rec.created, rid):  # existing is newer; ties broken by id
-                        self._db.execute("INSERT OR IGNORE INTO tombstones VALUES (?)", (rid,))
-                        return False
-                    self._db.execute("DELETE FROM records WHERE id=?", (old[0],))
-                    self._db.execute("INSERT OR IGNORE INTO tombstones VALUES (?)", (old[0],))
-            self._db.execute(
-                "INSERT INTO records VALUES (?,?,?,?,?,?,?,?)",
-                (rid, int(rec.kind), rec.origin, rec.created, rec.server_time, rec.key, rec.body, int(time.time())),
-            )
-            self._digest = None
-            return True
+        """Apply a record from a peer via the app's merge(). True if anything changed.
 
-    def close(self) -> None:
-        self._db.close()
+        The app decides everything: whether to keep it, tombstones killing
+        messages, and creating a 'delivered' tombstone if the message is ours.
+        """
+        try:
+            counts = self.db.merge({rec.table: [dict(rec.data)]})
+        except ValueError:
+            return False  # the app refused the row as malformed
+        self._index = None  # merge may also have created records (a delivered tombstone)
+        return any(counts.values())
 
     @property
     def last_server_sync(self) -> int:
-        with self._lock:
-            row = self._db.execute("SELECT v FROM meta WHERE k='last_server_sync'").fetchone()
-        return int(row[0]) if row else 0
+        return int(self.db.get_device()["last_server_sync"] or 0)
 
     @last_server_sync.setter
-    def last_server_sync(self, t: int) -> None:
-        with self._lock, self._db:
-            self._db.execute("INSERT OR REPLACE INTO meta VALUES ('last_server_sync', ?)", (int(t),))
+    def last_server_sync(self, t: float) -> None:
+        self.db.update_device(last_server_sync=t)

@@ -51,6 +51,7 @@ pytestdebug.log
 *.swo
 .DS_Store
 Thumbs.db
+.claude/
 
 ### Arduino / PlatformIO ###
 .pio/

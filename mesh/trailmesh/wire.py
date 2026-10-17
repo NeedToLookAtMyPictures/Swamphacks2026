@@ -13,7 +13,7 @@ from enum import IntEnum
 
 from .records import ID_LEN
 
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2  # v2: records mirror the app's tables, DATA blobs carry a CRC32
 MAX_FRAME = 250  # ESP-NOW v1 payload limit; no frame we send may exceed it
 
 

@@ -8,6 +8,9 @@ Discovery (replaces the TX/RX slot patterns from the original design):
     handles collisions, so no transmit/listen slots are needed.
   * If a beacon's digest differs from ours, the device with the lower id sends
     HELLO. The exchange keeps the radio awake past the window until it finishes.
+
+The data lives in the app's database, which the app writes to directly (new
+messages, comments, its own position once a minute). The node just syncs it.
 """
 from __future__ import annotations
 
@@ -19,7 +22,7 @@ from typing import Callable
 from .link import Link, RxFrame
 from .records import Kind, Record
 from .session import Session
-from .store import RecordStore
+from .store import AppStore
 from .wire import BEACON, HELLO, PROTOCOL_VERSION, Frame, T
 
 
@@ -46,37 +49,35 @@ class Config:
     linger: float = 3.0  # keep acking a finished session's stragglers this long
 
     accept_kinds: frozenset = field(default_factory=lambda: frozenset(Kind))
-    pin_interval: float = 300.0  # min seconds between auto-generated location pins
 
 
 class Node:
     def __init__(
         self,
-        device_id: int,
         link: Link,
-        store: RecordStore,
+        store: AppStore,
         config: Config | None = None,
         clock: Callable[[], float] = time.time,
-        position: Callable[[], tuple[float, float, int] | None] | None = None,
         on_record: Callable[[Record], None] | None = None,
+        on_delivered: Callable[[str, int], None] | None = None,
         on_session_end: Callable[[Session], None] | None = None,
         rng: random.Random | None = None,
     ):
         """
-        device_id:  32-bit id derived from the user id (must be nonzero and unique).
-        clock:      must return GPS/phone-synced unix time; all devices' windows depend on it.
-        position:   returns (lat, lon, heading) or None; used for the automatic pin on each handshake.
-        on_record:  called for every new record received over the mesh.
+        store:        the app's database, wrapped: AppStore(Database(...)).
+        clock:        must return GPS/phone-synced unix time; all devices' windows depend on it.
+        on_record:    called for every record a peer sent that changed the app's database.
+        on_delivered: called with (origin_id, seq) of one of our own messages when the
+                      receiver's 'delivered' tombstone reaches us. Until then the message
+                      is pending; the app treats it as lost if still pending after 31 days.
         """
-        if not 0 < device_id < 2**32:
-            raise ValueError("device_id must be a nonzero u32")
-        self.id = device_id
+        self.id = store.mesh_id
         self.link = link
         self.store = store
         self.cfg = config or Config()
         self.clock = clock
-        self.position = position
         self.on_record = on_record
+        self.on_delivered = on_delivered
         self.on_session_end = on_session_end
         self.rng = rng or random.Random()
 
@@ -88,7 +89,6 @@ class Node:
         self._window_idx: int | None = None
         self._beacon_times: list[float] = []
         self._next_beacon = 0.0
-        self._last_pin = -1e18
 
     # Main loop ----------------------------------------------------------------
 
@@ -167,9 +167,9 @@ class Node:
             version, _peer_sync, digest = BEACON.unpack_from(f.payload)
             if (
                 version == PROTOCOL_VERSION
-                and digest != self.store.digest()
                 and self.id < f.sender  # lower id initiates, so both sides don't HELLO at once
                 and now >= self._next_allowed.get(f.sender, 0)
+                and digest != self.store.digest()  # last: it reads the app's database
             ):
                 self._start_session(f.sender, initiator=True, now=now)
         elif f.type is T.HELLO and len(f.payload) >= HELLO.size:
@@ -182,7 +182,6 @@ class Node:
     def _start_session(
         self, peer: int, *, initiator: bool, now: float, session_id: int | None = None, peer_sync: int | None = None
     ) -> None:
-        self._add_own_pin(now)
         self.link.set_partner(peer)
         addr = self._addr.get(peer)
         self.session = Session(
@@ -196,8 +195,20 @@ class Node:
             send=lambda f: self.link.send(f.encode(), addr),
             now=now,
             peer_sync=peer_sync,
-            on_record=self.on_record,
+            on_record=self._on_new_record,
         )
+
+    def _on_new_record(self, rec: Record) -> None:
+        d = rec.data
+        if (
+            self.on_delivered
+            and rec.kind is Kind.TOMBSTONE
+            and d["reason"] == "delivered"
+            and d["target_origin_id"] == self.store.device_id
+        ):
+            self.on_delivered(d["target_origin_id"], int(d["target_seq"]))
+        if self.on_record:
+            self.on_record(rec)
 
     def _end_session(self, now: float) -> None:
         s = self.session
@@ -208,18 +219,3 @@ class Node:
         self._lingering.append((now + self.cfg.linger, s))
         if self.on_session_end:
             self.on_session_end(s)
-
-    def _add_own_pin(self, now: float) -> None:
-        """Location sharing: every handshake carries a fresh pin of our own position."""
-        if self.position is None or now - self._last_pin < self.cfg.pin_interval:
-            return
-        pos = self.position()
-        if pos is not None:
-            self.store.put(Record.pin(self.id, int(now), *pos))
-            self._last_pin = now
-
-    # App API ------------------------------------------------------------------------
-
-    def post(self, record: Record) -> None:
-        """Add a locally authored record; it spreads on the next encounter."""
-        self.store.put(record)

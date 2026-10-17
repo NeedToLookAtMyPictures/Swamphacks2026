@@ -8,13 +8,16 @@ import os
 import socket
 import struct
 import sys
+import tempfile
 import threading
 import time
 import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.dirname(__file__))
 
-from trailmesh import Config, Node, Record, RecordStore  # noqa: E402
+from app_db import database, new_db  # noqa: E402
+from trailmesh import AppStore, Config, Node  # noqa: E402
 from trailmesh.espnow_serial import (  # noqa: E402
     BROADCAST, CMD_GET_INFO, CMD_RADIO, CMD_SEND, CMD_SET_PARTNER, EVT_INFO, EVT_RECV, SlipDecoder, slip_encode,
 )
@@ -87,6 +90,7 @@ class FakeEsp32Pair:
 
 
 @unittest.skipIf(EspNowSerialLink is None, "pyserial not installed")
+@unittest.skipIf(database is None, "the app's database.py isn't available (no checkout or git main)")
 class SerialLinkTests(unittest.TestCase):
     def test_slip_roundtrip_with_escapes(self):
         msg = bytes([0xC0, 0xDB, 1, 2, 0xDC, 0xDD, 0xC0])
@@ -95,23 +99,24 @@ class SerialLinkTests(unittest.TestCase):
     def test_two_nodes_over_serial(self):
         fake = FakeEsp32Pair()
         links = [EspNowSerialLink(b["port"], log=None) for b in fake.boards]
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
         try:
-            a = Node(1, links[0], RecordStore(), Config(always_on=True))
-            b = Node(2, links[1], RecordStore(), Config(always_on=True))
-            rec = Record.locale_update(1, int(time.time()), "spring-1203", "water", "dry")
-            big = Record(rec.kind, 1, int(time.time()), bytes(range(256)) * 20, b"big")  # 5 KB, ~23 chunks
-            a.post(rec)
-            a.post(big)
+            a = Node(links[0], AppStore(new_db(tmp.name, "alice", "00000001")), Config(always_on=True))
+            b = Node(links[1], AppStore(new_db(tmp.name, "bob", "00000002")), Config(always_on=True))
+            small = a.store.db.add_locale("spring-1203", "Mile 1203 spring", "dry")
+            big = a.store.db.add_locale("spring-1203", "Mile 1203 spring", "w" * 5000)  # 5 KB, ~23 chunks
+            got = lambda r: b.store.db.get("locales", r["origin_id"], r["seq"])  # noqa: E731
             deadline = time.time() + 15
-            while time.time() < deadline and not (b.store.has(rec.id) and b.store.has(big.id)):
+            while time.time() < deadline and not (got(small) and got(big)):
                 a.poll()
                 b.poll()
                 time.sleep(0.002)
-            self.assertTrue(b.store.has(rec.id))
-            self.assertEqual(b.store.get(big.id).body, big.body)
+            self.assertIsNotNone(got(small))
+            self.assertEqual(got(big)["comment"], big["comment"])
             self.assertEqual(links[0].mac, fake.boards[0]["mac"])
             self.assertLessEqual(max(fake.frame_sizes), MAX_FRAME)
-            self.assertGreater(len(fake.frame_sizes), len(big.encode()) // MAX_FRAME, "big record must be split")
+            self.assertGreater(len(fake.frame_sizes), 5000 // MAX_FRAME, "big record must be split")
         finally:
             for lk in links:
                 lk.close()

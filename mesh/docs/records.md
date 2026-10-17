@@ -1,108 +1,93 @@
 # records.py: the data model
 
-**Purpose.** Defines `Record`, the single unit of data that gets stored, gossiped
-and synced. Everything the protocol moves (locale updates, messages, pins)
-is a `Record`.
+**Purpose.** Defines `Record`, the unit of data the mesh moves. Each record is
+**one row of one shared table of the app's database**
+(`application/user_app/database.py`). The mesh doesn't have its own data model:
+the app owns the tables and every rule about them, and the mesh only carries rows
+between devices.
 
-## Kinds and priority
+## Kinds
 
-```python
-class Kind(IntEnum):
-    LOCALE_UPDATE = 1   # water level, campsite quality, hazards...
-    MESSAGE = 2         # free text plus the sender's position
-    PIN = 3             # a hiker's position and heading at a moment
-```
+| Kind | App table | What it is |
+|---|---|---|
+| `LOCALE` (1) | `locales` | A review/comment on a location (water source, campsite) |
+| `MESSAGE` (2) | `messages` | Text to a person's name, or `*` for everyone |
+| `GEOLOCATION` (3) | `geolocations` | A user's position; the app keeps only the newest per user |
+| `TOMBSTONE` (4) | `tombstones` | Kills a message everywhere (`reason` e.g. `delivered`) |
 
-`PRIORITY` sets the order in which records are **sent** during an exchange
-(lower goes first):
+`PRIORITY` sets the order in which records are **sent** (lower goes first):
 
 | Kind | Priority | Why |
 |---|---|---|
-| LOCALE_UPDATE | 0 | Safety-critical, small |
-| MESSAGE | 1 | Small |
-| PIN | 2 | Small, for search and rescue |
+| LOCALE | 0 | Water and campsite reports are the safety-relevant data |
+| MESSAGE | 1 | |
+| GEOLOCATION | 2 | |
+| TOMBSTONE | 3 | Cleanup, least urgent |
 
 So a hiker who walks out of range mid-exchange already has the important
-records. Within the same kind, newer records go first (see [session.md](session.md)).
+records. Within a kind, newer records go first (see [session.md](session.md)).
 
 ## Fields
 
-| Field | Type | Meaning |
-|---|---|---|
-| `kind` | `Kind` | One of the above |
-| `origin` | u32 | Device id of the **author** (not of whoever relayed it) |
-| `created` | u32 | Unix seconds when it was authored (from the synced clock) |
-| `body` | bytes | Content. Its layout depends on the kind, see below. |
-| `key` | bytes, 0–255 bytes | **Supersede key.** A newer record with the same `(kind, key)` replaces older ones. Empty means it is never replaced. |
-| `server_time` | u32 | When the server first saw the record. 0 means not yet. |
+`record.data` is the app's row as a dict, with exactly the app's column names,
+minus `time_received` (local bookkeeping that the app never shares either).
+
+| Kind | Columns |
+|---|---|
+| LOCALE | `origin_id, seq, time_created, location, name, sender, comment` |
+| MESSAGE | `origin_id, seq, time_created, sender, receiver, is_dead, content` |
+| GEOLOCATION | `user, origin_id, time_created, latitude, longitude` |
+| TOMBSTONE | `origin_id, seq, target_origin_id, target_seq, time_created, reason` |
+
+**If a shared table's columns change in the app, `FIELDS` in `records.py` must
+change with it.** `Record.from_row(table, row)` builds a record from an app row.
 
 ## Record id
 
+The app identifies a row by `(origin_id, seq)`: the device that created it and
+that device's counter. The mesh needs a fixed-size id for its manifests, so:
+
 ```
-id = SHA-256( kind u8 | origin u32 | created u32 | len(key) u8 | key | body )[:8]
+LOCALE, MESSAGE, TOMBSTONE:  id = SHA-256(kind, origin_id, seq)[:8]
+GEOLOCATION:                 id = SHA-256(kind, lower(user), origin_id, time_created)[:8]
 ```
 
-- 8 bytes (64 bits). Duplicates are harmless: the same content always gives the
-  same id.
-- **`server_time` is excluded on purpose.** A record gets its `server_time`
-  later, when it reaches the server, and its id must not change when that
-  happens. So the same record seen before and after server upload is still one
-  record.
-- Computed once per object (`cached_property`).
+- Every copy of the same row has the same id, even if a mutable column differs.
+  A message marked dead (`is_dead = 1`) keeps its id.
+- A geolocation has no `seq`: the app replaces a user's row whenever they move.
+  So each position gets its own id, and a peer requests a new position as a new record.
+- A tombstone's target id can be computed from `target_origin_id` and `target_seq`,
+  which is how the store recognises a message that a tombstone has killed
+  ([store.md](store.md)).
+- The id is **not** a hash of the contents, so it can't detect corrupted bytes.
+  The session adds a CRC32 for that ([session.md](session.md)).
 
 ## Serialization (`encode` / `decode`)
 
 ```
-kind u8 | origin u32 | created u32 | server_time u32 | key_len u8 | key | body
+kind u8 | the kind's fields in the order above
 ```
 
-All values are little-endian. The body has no length field; it runs to the end
-of the buffer. That works because the receiver reassembles the exact byte string
-first (see DATA chunks in [session.md](session.md)).
+| Field type | Encoding |
+|---|---|
+| ids, names, `location`, `reason` | u16 length + UTF-8 |
+| `comment`, `content` | u32 length + UTF-8 |
+| `seq`, `target_seq` | u32 |
+| `is_dead` | u8 |
+| times, latitude, longitude | f64 (exactly the app's REAL value) |
 
-`decode(data)` is the inverse. It raises `struct.error` or `ValueError` on
-malformed bytes, and the session's DATA handler drops such records. The
-session then recomputes the id and checks that it equals the id it asked for,
-and that check is the integrity check.
-
-Records have no size limit of their own: a large record is split across many
-frames of at most 250 bytes (see [wire.md](wire.md)). The only field limit is
-the key, which must be ≤ 255 bytes because its length is one byte. `Record(...)`
-raises `ValueError` otherwise.
-
-## Constructors
-
-| Call | key | body |
-|---|---|---|
-| `Record.locale_update(origin, created, locale_id, field, text)` | `"{locale_id}:{field}"` | UTF-8 text |
-| `Record.message(origin, created, text, lat, lon)` | empty | position struct (heading 0) + UTF-8 text |
-| `Record.pin(origin, created, lat, lon, heading)` | empty | position struct |
-
-Position struct: `lat*1e7 i32 | lon*1e7 i32 | heading u16` (10 bytes, about 1 cm resolution).
-
-Helpers: `rec.position()` returns `(lat, lon, heading)` for PIN and MESSAGE
-records. `rec.text()` returns the text of a MESSAGE or LOCALE_UPDATE.
-
-## How overrides work (the "supersede key")
-
-The issue says new information overrides older data that overlaps it. The code
-defines "overlap" as **same kind and same key**:
-
-- `locale_update(..., "spring-1203", "water", ...)` has key `spring-1203:water`.
-  A newer water report for the same spring replaces the older one. A
-  `spring-1203:campsite` report is a different key and is left alone.
-- Messages and pins have an empty key, so they **accumulate** and are never
-  replaced. This matches "every device stores all the pins it has ever received."
-
-The replacement itself happens in the store; see [store.md](store.md).
+All little-endian. `decode` raises `ValueError` or `struct.error` on malformed
+input: an unknown kind, a field running past the end, bytes left over, or bad
+UTF-8. `encode` raises `struct.error` if a value doesn't fit its field
+(`seq` over 2³², a short string over 64 KB), and the session skips that record.
 
 ## Assumptions
 
-- `created` comes from a synced clock. If a device's clock is far ahead, its
-  locale updates win every override comparison until real time catches up.
-- `origin` is trusted. Nothing proves who wrote a record.
-- There is no expiry or TTL field.
+- `time_created` comes from the device clock. A device whose clock is far off
+  makes its messages expire early or late, and can win "newest position" ties.
+- `origin_id`, `sender` and `user` are trusted. Nothing proves who wrote a record.
 
 ## Known gaps
 
-- **No signatures.** Anyone can author a record with any `origin`.
+- **No signatures.** Anyone can write a record claiming any sender, including
+  a tombstone that kills someone else's message.
