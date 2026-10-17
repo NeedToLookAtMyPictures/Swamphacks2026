@@ -1,27 +1,33 @@
 # User App
 
 Offline demo app. `main.py` runs everything: a small Flask server serves the web
-interface and the locally stored map tiles. Leaflet is in `static/vendor/`, so
-nothing is loaded from the internet at runtime.
+interface and the downloaded map. Leaflet and protomaps-leaflet are in
+`static/vendor/`, so nothing is loaded from the internet at runtime.
+
+The map is a [Protomaps](https://protomaps.com) vector basemap built from
+OpenStreetMap data. (OpenStreetMap's own tile servers don't allow downloading
+tiles for offline use, so we don't use them.)
 
 ## Setup (needs internet once)
 
 ```bash
 cd application/user_app
 pip install -r requirements.txt
-python main.py download-map          # Gainesville, FL, zoom 10-16 (~1350 tiles)
+python main.py download-map          # Gainesville, FL, zoom 8-15 (a few MB)
 ```
 
-Other areas:
+`download-map` finds the latest daily Protomaps world build, uses HTTP range
+requests to pull only the tiles inside the area, and saves them as one file,
+`data/map.pmtiles` (git-ignored). Running it again replaces the old map.
+
+Other areas and sources:
 
 ```bash
 python main.py download-map --place "Ocala, Florida"
-python main.py download-map --bbox -82.42 29.59 -82.25 29.73 --max-zoom 17
+python main.py download-map --bbox -82.42 29.59 -82.25 29.73
+python main.py download-map --source https://build.protomaps.com/20261015.pmtiles
+python main.py download-map --source some-local-file.pmtiles
 ```
-
-Tiles are saved to `data/tiles/` (git-ignored). Running the command again skips
-tiles you already have. Keep the area and zoom small, because OpenStreetMap's
-tile servers don't allow bulk downloads.
 
 ## Run (works offline)
 

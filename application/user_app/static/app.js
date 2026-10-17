@@ -6,16 +6,19 @@ function initMap() {
 
   map = L.map("leaflet-map", {
     minZoom: info.min_zoom,
-    maxZoom: info.max_zoom,
+    maxZoom: info.max_zoom + 3,  // past the data's max zoom the vectors are scaled up
     maxBounds: [[minLat, minLon], [maxLat, maxLon]],
     maxBoundsViscosity: 0.8,
-  }).setView(info.center, Math.min(info.min_zoom + 3, info.max_zoom));
+  }).setView(info.center, Math.min(info.min_zoom + 5, info.max_zoom));
 
-  // Tiles are served locally by main.py from data/tiles
-  L.tileLayer("/tiles/{z}/{x}/{y}.png", {
-    minZoom: info.min_zoom,
-    maxZoom: info.max_zoom,
-    attribution: "&copy; OpenStreetMap contributors",
+  if (!info.name) return;  // no map downloaded yet
+
+  // Vector map served locally by main.py from data/map.pmtiles
+  protomapsL.leafletLayer({
+    url: "/map.pmtiles",
+    flavor: "light",
+    lang: "en",
+    maxDataZoom: info.max_zoom,
   }).addTo(map);
 }
 
