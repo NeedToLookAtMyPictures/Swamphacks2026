@@ -98,6 +98,6 @@ Tests: `python -m unittest test_database`
 
 ## Tabs
 
-- **Messages**: the To dropdown lists everyone in your GPS data, plus Everyone and Other (type any name); shows messages you sent, received, and broadcasts
+- **Messages**: a sidebar with one conversation per person (everyone you've messaged or seen in GPS data), with Everyone pinned to the top; click one to see its history and send to that person, or type any name in "New chat"
 - **Map**: offline Leaflet map
 - **Debug**: shows every table in the local database (refresh button; offers to create the device if it has no identity yet)

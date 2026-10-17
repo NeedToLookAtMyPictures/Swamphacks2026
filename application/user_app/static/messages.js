@@ -1,9 +1,10 @@
-// Messages tab: send to someone you've encountered or to any name, and list messages.
+// Messages tab: one conversation per person in a sidebar (Everyone pinned to the
+// top); clicking one shows its history and sends new messages to that person.
 
 let myName = null;
+let selected = null;   // receiver of the open conversation: BROADCAST or a name
 
 const BROADCAST = "*";        // receiver for messages to everyone
-const OTHER = "__other__";    // dropdown value that reveals the free-text box
 
 const sameName = (a, b) => a.toLowerCase() === b.toLowerCase();
 
@@ -20,6 +21,16 @@ function describeContact(c) {
   return `seen ${when} near ${c.latitude.toFixed(4)}, ${c.longitude.toFixed(4)}`;
 }
 
+// Which conversation a message belongs to: Everyone, or the other person
+function conversationOf(m) {
+  if (m.receiver === BROADCAST) return BROADCAST;
+  return sameName(m.sender, myName) ? m.receiver : m.sender;
+}
+
+const inConversation = (m, who) =>
+  who === BROADCAST ? m.receiver === BROADCAST
+                    : m.receiver !== BROADCAST && sameName(conversationOf(m), who);
+
 function renderMessage(m) {
   const outgoing = sameName(m.sender, myName);
   const broadcast = m.receiver === BROADCAST;
@@ -29,8 +40,7 @@ function renderMessage(m) {
   if (m.is_dead && outgoing) card.classList.add("dead");
 
   const head = msgEl("div", undefined, "message-head");
-  const to = broadcast ? "Everyone" : m.receiver;
-  head.appendChild(msgEl("strong", outgoing ? `To ${to}` : `From ${m.sender}${broadcast ? " to Everyone" : ""}`));
+  head.appendChild(msgEl("strong", outgoing ? "You" : m.sender));
   head.appendChild(msgEl("span", new Date(m.time_created * 1000).toLocaleString()));
   card.appendChild(head);
   card.appendChild(msgEl("div", m.content, "message-body"));
@@ -41,10 +51,15 @@ function renderMessage(m) {
   return card;
 }
 
+let lastMessages = [];
+let lastPeople = [];
+
 async function loadMessages() {
   const list = document.getElementById("message-list");
   const deviceRes = await fetch("/api/device");
   if (!deviceRes.ok) {
+    document.getElementById("chat-list").replaceChildren();
+    document.getElementById("chat-title").textContent = "";
     list.replaceChildren(msgEl("p", "Set up this device first (Debug tab).", "message-note"));
     return;
   }
@@ -56,9 +71,7 @@ async function loadMessages() {
     fetch("/api/geolocations").then((r) => r.json()),
   ]);
 
-  fillRecipients(gps.filter((g) => !sameName(g.user, myName)));
-
-  // Suggestions for the "Type a name" box: everyone this device knows about
+  // Suggestions for the "New chat" box: everyone this device knows about
   const options = document.getElementById("contact-list");
   options.replaceChildren(...contacts.map((c) => {
     const option = msgEl("option");
@@ -68,51 +81,85 @@ async function loadMessages() {
   }));
 
   // Only messages I sent or that are addressed to me; the rest are just being relayed
-  const mine = messages
+  lastMessages = messages
     .filter((m) => m.receiver === BROADCAST || [m.sender, m.receiver].some((n) => sameName(n, myName)))
-    .reverse();  // newest first
-  list.replaceChildren(...(mine.length ? mine.map(renderMessage)
-                                       : [msgEl("p", "No messages yet.", "message-note")]));
-}
+    .sort((a, b) => a.time_created - b.time_created);  // oldest first, like a chat
 
-// "To" dropdown: everyone in the GPS table (newest position first), Everyone, or Other
-function fillRecipients(people) {
-  const select = document.getElementById("compose-to");
-  const previous = select.value;
-  const option = (value, label) => {
-    const o = msgEl("option", label);
-    o.value = value;
-    return o;
+  // One conversation per person I've messaged with or seen on GPS
+  const latest = new Map();  // lowercase name -> {name, time}
+  const note = (name, time) => {
+    if (!name || name === BROADCAST || sameName(name, myName)) return;
+    const key = name.toLowerCase();
+    const prev = latest.get(key);
+    if (!prev || time > prev.time) latest.set(key, { name: prev ? prev.name : name, time });
   };
-  const sorted = [...people].sort((a, b) => b.time_created - a.time_created);
-  const placeholder = option("", "Choose a recipient…");
-  placeholder.disabled = true;
-  select.replaceChildren(
-    placeholder,
-    option(BROADCAST, "Everyone"),
-    ...sorted.map((g) => option(g.user,
-      `${g.user} (seen ${new Date(g.time_created * 1000).toLocaleString()})`)),
-    option(OTHER, "Other (type a name)…"),
+  gps.forEach((g) => note(g.user, 0));  // seen but never messaged: listed after conversations
+  lastMessages.forEach((m) => note(conversationOf(m), m.time_created));
+  // A chat just started from the "New chat" box has no messages yet; keep it on top
+  if (selected && selected !== BROADCAST && !latest.has(selected.toLowerCase())) {
+    latest.set(selected.toLowerCase(), { name: selected, time: Infinity });
+  }
+  lastPeople = [...latest.values()]
+    .sort((a, b) => b.time - a.time || a.name.localeCompare(b.name))
+    .map((p) => p.name);
+
+  if (!selected) selected = BROADCAST;
+  render();
+}
+
+function render() {
+  const sidebar = document.getElementById("chat-list");
+  const tab = (who, label, preview) => {
+    const b = msgEl("button", undefined, "chat-tab");
+    if (who === BROADCAST) b.classList.add("pinned");
+    if (who === selected || (who !== BROADCAST && selected !== BROADCAST && sameName(who, selected))) {
+      b.classList.add("active");
+    }
+    b.appendChild(msgEl("strong", label));
+    b.appendChild(msgEl("span", preview, "chat-preview"));
+    b.addEventListener("click", () => openChat(who));
+    return b;
+  };
+  const previewOf = (who) => {
+    const last = lastMessages.filter((m) => inConversation(m, who)).at(-1);
+    if (!last) return "No messages yet";
+    return (sameName(last.sender, myName) ? "You: " : who === BROADCAST ? `${last.sender}: ` : "") + last.content;
+  };
+  sidebar.replaceChildren(
+    tab(BROADCAST, "Everyone", previewOf(BROADCAST)),
+    ...lastPeople.map((name) => tab(name, name, previewOf(name))),
   );
-  // Keep the current choice across refreshes if it's still there
-  select.value = [...select.options].some((o) => o.value === previous && previous) ? previous : "";
-  toggleOther();
+
+  document.getElementById("chat-title").textContent = selected === BROADCAST ? "Everyone" : selected;
+  const list = document.getElementById("message-list");
+  const history = lastMessages.filter((m) => inConversation(m, selected));
+  list.replaceChildren(...(history.length ? history.map(renderMessage)
+                                          : [msgEl("p", "No messages yet.", "message-note")]));
+  list.scrollTop = list.scrollHeight;  // newest at the bottom
 }
 
-function toggleOther() {
-  const other = document.getElementById("compose-other");
-  other.hidden = document.getElementById("compose-to").value !== OTHER;
-  other.required = !other.hidden;
+function openChat(who) {
+  selected = who;
+  document.getElementById("compose-status").textContent = "";
+  render();
 }
 
-document.getElementById("compose-to").addEventListener("change", toggleOther);
+document.getElementById("new-chat").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const input = document.getElementById("new-chat-name");
+  const name = input.value.trim();
+  if (!name) return;
+  input.value = "";
+  if (sameName(name, myName)) return;
+  const existing = lastPeople.find((p) => sameName(p, name));
+  if (!existing) lastPeople.unshift(name);
+  openChat(existing || name);
+});
 
 document.getElementById("compose").addEventListener("submit", async (e) => {
   e.preventDefault();
-  const select = document.getElementById("compose-to");
-  const receiver = select.value === OTHER
-    ? document.getElementById("compose-other").value.trim()
-    : select.value;
+  if (!selected) return;
+  const receiver = selected;
   const label = receiver === BROADCAST ? "everyone" : receiver;
   const content = document.getElementById("compose-content");
   const status = document.getElementById("compose-status");

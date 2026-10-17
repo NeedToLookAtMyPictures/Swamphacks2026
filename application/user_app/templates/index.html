@@ -16,20 +16,26 @@
 
   <main>
     <section id="messages" class="panel active">
-      <form id="compose">
-        <label>To
-          <select id="compose-to" required></select>
-        </label>
-        <input id="compose-other" list="contact-list" placeholder="Type a name"
-               pattern="[A-Za-z0-9_\-]{1,32}" autocomplete="off" hidden>
-        <datalist id="contact-list"></datalist>
-        <textarea id="compose-content" placeholder="Message" rows="3" required></textarea>
-        <div class="compose-row">
-          <span id="compose-status"></span>
-          <button>Send</button>
-        </div>
-      </form>
-      <div id="message-list"></div>
+      <aside id="chat-sidebar">
+        <form id="new-chat">
+          <input id="new-chat-name" list="contact-list" placeholder="New chat: type a name"
+                 pattern="[A-Za-z0-9_\-]{1,32}" autocomplete="off" required>
+          <datalist id="contact-list"></datalist>
+          <button>+</button>
+        </form>
+        <div id="chat-list"></div>
+      </aside>
+      <div id="chat-view">
+        <div id="chat-title"></div>
+        <div id="message-list"></div>
+        <form id="compose">
+          <textarea id="compose-content" placeholder="Message" rows="2" required></textarea>
+          <div class="compose-row">
+            <span id="compose-status"></span>
+            <button>Send</button>
+          </div>
+        </form>
+      </div>
     </section>
 
     <section id="map" class="panel">

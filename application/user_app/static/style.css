@@ -111,9 +111,104 @@ main {
 
 .debug-form { display: flex; gap: 8px; }
 
-/* Messages tab */
-#messages {
-  overflow: auto;
+/* Messages tab: conversation sidebar on the left, open conversation on the right */
+#messages.active { display: flex; }
+
+#chat-sidebar {
+  width: 260px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border-right: 1px solid #ddd;
+}
+
+#new-chat {
+  display: flex;
+  gap: 6px;
+  padding: 8px;
+  border-bottom: 1px solid #ddd;
+}
+
+#new-chat input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 14px;
+  border: 1px solid #bbb;
+  border-radius: 4px;
+}
+
+#new-chat button, #compose button {
+  padding: 6px 14px;
+  border: none;
+  border-radius: 4px;
+  background: #2e5a43;
+  color: #fff;
+  cursor: pointer;
+}
+
+#chat-list {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.chat-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  border-bottom: 1px solid #eee;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.chat-tab:hover { background: #f0f5f1; }
+.chat-tab.active { background: #e0ebe3; box-shadow: inset 4px 0 #2e5a43; }
+
+/* Everyone stays at the top of the list while the rest scrolls */
+.chat-tab.pinned {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #f7faf8;
+  border-bottom: 1px solid #ccd9cf;
+}
+.chat-tab.pinned.active { background: #e0ebe3; }
+
+.chat-preview {
+  color: #777;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#chat-view {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+#chat-title {
+  padding: 10px 16px;
+  font-weight: 600;
+  background: #fff;
+  border-bottom: 1px solid #ddd;
+}
+
+#message-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   padding: 12px 16px;
 }
 
@@ -121,23 +216,17 @@ main {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-width: 640px;
-  margin-bottom: 16px;
+  padding: 10px 16px;
+  background: #fff;
+  border-top: 1px solid #ddd;
 }
 
-#compose label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-weight: 600;
-}
-
-#compose input, #compose textarea, #compose select {
-  flex: 1;
+#compose textarea {
   padding: 8px;
   font: inherit;
   border: 1px solid #bbb;
   border-radius: 4px;
+  resize: vertical;
 }
 
 .compose-row {
@@ -149,37 +238,24 @@ main {
 
 #compose-status { color: #555; font-size: 14px; }
 
-#compose button {
-  padding: 6px 14px;
-  border: none;
-  border-radius: 4px;
-  background: #2e5a43;
-  color: #fff;
-  cursor: pointer;
-}
-
-#message-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-width: 640px;
-}
-
 .message {
+  max-width: 80%;
   padding: 10px 12px;
   border-radius: 6px;
   background: #fff;
   border-left: 4px solid #2e5a43;
 }
 
-.message.outgoing { border-left-color: #7a9cc6; }
-#compose input[hidden] { display: none; }
+.message.outgoing {
+  align-self: flex-end;
+  border-left-color: #7a9cc6;
+}
 .message.dead { opacity: 0.55; }
 
 .message-head {
   display: flex;
   justify-content: space-between;
-  gap: 8px;
+  gap: 12px;
   font-size: 13px;
   color: #555;
 }
