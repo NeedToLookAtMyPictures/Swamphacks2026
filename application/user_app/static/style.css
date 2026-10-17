@@ -186,3 +186,66 @@ main {
 
 .message-body { margin: 6px 0; white-space: pre-wrap; }
 .message-note { color: #888; font-size: 13px; margin: 0; }
+
+/* Map settings menu */
+#map-settings {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+#map-settings-toggle {
+  width: 40px;
+  height: 40px;
+  border: 2px solid rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+  background: #fff;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+#map-settings-panel {
+  width: 260px;
+  max-width: calc(100vw - 20px);
+  padding: 8px;
+  background: #fff;
+  border: 2px solid rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+}
+
+#map-settings-panel[hidden], .map-setting[hidden], .map-setting-empty[hidden] { display: none; }
+
+#map-settings-search {
+  width: 100%;
+  padding: 6px 8px;
+  font: inherit;
+  border: 1px solid #bbb;
+  border-radius: 4px;
+}
+
+#map-settings-list {
+  max-height: 240px;
+  overflow-y: auto;
+  margin-top: 6px;
+}
+
+.map-setting {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.map-setting:hover { background: #e8efe9; }
+.map-setting input { margin-top: 3px; }
+.map-setting-label { display: block; font-weight: 600; }
+.map-setting-desc { display: block; font-size: 13px; color: #666; }
+.map-setting-empty { margin: 6px 4px; color: #888; font-size: 14px; }

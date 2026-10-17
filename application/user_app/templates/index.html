@@ -37,6 +37,13 @@
       <div class="notice">No offline map downloaded. Run <code>python download_locales.py map</code>.</div>
       {% endif %}
       <div id="leaflet-map"></div>
+      <div id="map-settings">
+        <button id="map-settings-toggle" type="button" title="Map settings" aria-label="Map settings">&#9881;</button>
+        <div id="map-settings-panel" hidden>
+          <input id="map-settings-search" type="search" placeholder="Search settings" autocomplete="off">
+          <div id="map-settings-list"></div>
+        </div>
+      </div>
     </section>
 
     <section id="debug" class="panel">
@@ -54,6 +61,7 @@
   <script src="{{ url_for('static', filename='vendor/protomaps-leaflet/protomaps-leaflet.js') }}"></script>
   <script src="{{ url_for('static', filename='messages.js') }}"></script>
   <script src="{{ url_for('static', filename='debug.js') }}"></script>
+  <script src="{{ url_for('static', filename='map-settings.js') }}"></script>
   <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
 </html>
