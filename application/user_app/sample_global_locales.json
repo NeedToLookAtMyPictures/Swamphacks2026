@@ -23,19 +23,7 @@
       "id": "trail-gainesville-hawthorne",
       "name": "Gainesville-Hawthorne Trail",
       "description": "Paved rail trail from Depot Park east past Boulware Springs",
-      "gpx_file": "sample_trails/gainesville-hawthorne.gpx"
-    },
-    {
-      "id": "trail-hogtown",
-      "name": "Hogtown Creek Greenway",
-      "description": "Boardwalk and dirt trail along the creek",
-      "gpx_file": "sample_trails/hogtown-greenway.gpx"
-    },
-    {
-      "id": "trail-sweetwater",
-      "name": "Sweetwater Wetlands loop",
-      "description": "Loop around the wetlands; watch for alligators",
-      "gpx_file": "sample_trails/sweetwater-loop.gpx"
+      "gpx_file": "sample_trails/Gainesville-Hawthorne_State_Trail.gpx"
     }
   ]
 }

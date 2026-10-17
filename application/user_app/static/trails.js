@@ -13,7 +13,10 @@ function formatTrailLength(km) {
 
 async function loadTrails() {
   globalTrails = await fetch("/api/global/trails").then((r) => r.json());
-  if (!globalTrails.some((t) => t.id === selectedTrailId)) selectedTrailId = null;
+  if (!globalTrails.some((t) => t.id === selectedTrailId)) {
+  selectedTrailId = globalTrails.length ? globalTrails[0].id : null;
+  }
+
   drawTrails();
   renderTrailsList();
 }
@@ -42,7 +45,7 @@ function renderTrailsList() {
   const matches = globalTrails.filter((t) => `${t.name} ${t.description}`.toLowerCase().includes(q));
 
   if (!globalTrails.length) {
-    list.replaceChildren(settingsEl("p", "No trails yet; sync with the server", "settings-empty"));
+    list.replaceChildren(...rows);
     return;
   }
   const row = (id, name, detail) => {
