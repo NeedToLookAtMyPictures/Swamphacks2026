@@ -54,6 +54,30 @@ onRecv() (runs in the Wi-Fi task, must be fast):
 (packed, little-endian; must match `STATUS` in `espnow_serial.py`). `last_err` is
 the `esp_err_t` of the most recent failure. The firmware log line gives its name.
 
+### Text commands (for a human at a serial monitor)
+
+Type a command and press Enter, at any baud rate (native USB ignores it):
+
+| Command | Reply |
+|---|---|
+| `HELP` | List of commands |
+| `ID` | `OK espnow_bridge mac=b8:f8:62:d6:67:0c radio=on channel=6` |
+| `STATUS` | Radio state, partner filter, sent / send errors / received / filtered / dropped counts, last error name |
+| `ON` / `OFF` | Start or stop the radio, like esp-now-modem |
+| `TX <text>` | Broadcast raw text. The other board prints it if it's also in text mode. |
+
+The firmware has **no device id**. The trailmesh device id lives in Python
+(`--id`), so `ID` reports the MAC address instead.
+
+How the two formats coexist: Python's binary messages always start with
+`0xC0`, which never appears in typed text. Bytes outside a binary message are
+collected into a line and run as a text command. A text command switches the
+board into **text mode**: logs print as `LOG ...` lines and received frames as
+`RX <mac> <rssi> <printable payload>` (non-printable bytes become `.`, like
+esp-now-modem). The next binary message from Python switches back. If a binary
+message stops partway (host killed mid-write), it's dropped after 500 ms, so
+typed commands keep working.
+
 ## Radio power
 
 - `radioStart()`: Wi-Fi in station mode, **wait up to 3 s for `WiFi.STA.started()`**,

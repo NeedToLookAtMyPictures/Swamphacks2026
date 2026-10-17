@@ -1,4 +1,4 @@
-"""Transfer a large record between two boards on the SAME computer and measure it.
+"""Transfer a large message between two boards on the SAME computer and measure it.
 
     python examples/bulk_test.py --port-a /dev/ttyACM0 --port-b /dev/ttyACM1 --size 51200
 
@@ -19,7 +19,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--port-a", required=True)
     ap.add_argument("--port-b", required=True)
-    ap.add_argument("--size", type=int, default=51200, help="image size in bytes")
+    ap.add_argument("--size", type=int, default=51200, help="message size in bytes")
     ap.add_argument("--timeout", type=float, default=60)
     args = ap.parse_args()
 
@@ -29,9 +29,9 @@ def main():
     ends = []
     a = Node(1, la, RecordStore(), Config(always_on=True), on_session_end=ends.append)
     b = Node(2, lb, RecordStore(), Config(always_on=True), on_session_end=ends.append)
-    img = Record(Kind.IMAGE, 1, int(time.time()), os.urandom(args.size))
+    img = Record(Kind.MESSAGE, 1, int(time.time()), os.urandom(args.size))
     a.post(img)
-    print(f"node 1 has a {args.size} B image; waiting for node 2 to receive it...")
+    print(f"node 1 has a {args.size} B message; waiting for node 2 to receive it...")
 
     t0 = time.time()
     got = None
