@@ -279,6 +279,12 @@ class Database:
         with self._connect() as conn:
             return [dict(r) for r in conn.execute(query + " ORDER BY time_created", params)]
 
+    def get_location(self, user):
+        """A user's last known position, or None."""
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM geolocations WHERE user = ?", (user,)).fetchone()
+        return dict(row) if row else None
+
     def contacts(self):
         """Everyone this device knows about, from any data it holds, except itself.
 

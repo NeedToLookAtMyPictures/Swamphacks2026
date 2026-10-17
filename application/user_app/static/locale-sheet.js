@@ -3,8 +3,12 @@
 //
 // Comments are user `locales` records (database.py) whose `location` is the
 // global locale's id, so they spread to other devices like messages do.
+//
+// The distance is walked along the trails from your last location
+// (/api/distances), and the route is drawn while the sheet is open.
 
 let sheetLocale = null;  // the global locale shown in the sheet, or null when closed
+let routeLayer = null;   // the route to the locale in the sheet
 
 function sheetEl(tag, text, className) {
   const node = document.createElement(tag);
@@ -13,16 +17,30 @@ function sheetEl(tag, text, className) {
   return node;
 }
 
-function distanceKm(lat1, lon1, lat2, lon2) {
-  const rad = Math.PI / 180;
-  const a = Math.sin((lat2 - lat1) * rad / 2) ** 2 +
-            Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin((lon2 - lon1) * rad / 2) ** 2;
-  return 12742 * Math.asin(Math.sqrt(a));
+function formatDistance(meters) {
+  const km = meters / 1000;
+  const miles = km * 0.621371;
+  return miles < 0.1 ? `${Math.round(meters)} m` : `${miles.toFixed(1)} mi (${km.toFixed(1)} km)`;
 }
 
-function formatDistance(km) {
-  const miles = km * 0.621371;
-  return miles < 0.1 ? `${Math.round(km * 1000)} m` : `${miles.toFixed(1)} mi (${km.toFixed(1)} km)`;
+function describeRoute(route) {
+  if (route.distance === null) {
+    return `${formatDistance(route.straight)} in a straight line from your last location; ` +
+           "no trail connects you";
+  }
+  const offTrail = [];
+  if (route.to_trail >= 1) offTrail.push(`${formatDistance(route.to_trail)} to the trail`);
+  if (route.from_trail >= 1) offTrail.push(`${formatDistance(route.from_trail)} from it`);
+  return `${formatDistance(route.distance)} along the trail from your last location` +
+         (offTrail.length ? ` (${offTrail.join(", ")})` : "");
+}
+
+function drawRoute(route) {
+  if (routeLayer) map.removeLayer(routeLayer);
+  routeLayer = route && route.path
+    ? L.polyline(route.path, { color: "#1565c0", weight: 4, dashArray: "8 6", interactive: false })
+        .addTo(map)
+    : null;
 }
 
 function openLocaleSheet(locale) {
@@ -38,6 +56,7 @@ function openLocaleSheet(locale) {
 
 function closeLocaleSheet() {
   sheetLocale = null;
+  drawRoute(null);
   document.getElementById("locale-sheet").hidden = true;
   map.invalidateSize();  // the map gets its full height back, keeping its center
   drawGlobalLocales();
@@ -45,24 +64,26 @@ function closeLocaleSheet() {
 
 async function loadLocaleSheet() {
   const locale = sheetLocale;
-  const [records, gps, deviceRes] = await Promise.all([
+  const [records, deviceRes, distanceRes] = await Promise.all([
     fetch("/api/locales").then((r) => r.json()),
-    fetch("/api/geolocations").then((r) => r.json()),
     fetch("/api/device"),
+    fetch(`/api/distances?to=${encodeURIComponent(locale.id)}`),  // fails until you have a position
   ]);
   if (sheetLocale !== locale) return;  // another locale was opened meanwhile
   const me = deviceRes.ok ? (await deviceRes.json()).name : null;
+  const route = distanceRes.ok ? (await distanceRes.json()).locales[0] : null;
   const comments = records
     .filter((r) => r.location === locale.id && r.comment)
     .sort((a, b) => b.time_created - a.time_created);  // newest first
 
-  renderLocaleInfo(locale, comments, gps, me);
+  renderLocaleInfo(locale, comments, route);
+  drawRoute(route);
   renderLocaleComments(comments, me);
   document.getElementById("locale-comment-form").hidden = !me;
   document.getElementById("locale-comment-setup").hidden = Boolean(me);
 }
 
-function renderLocaleInfo(locale, comments, gps, me) {
+function renderLocaleInfo(locale, comments, route) {
   const color = categoryColor(locale.category);
   const head = document.getElementById("locale-sheet-head");
   const dot = sheetEl("span", undefined, "settings-dot");
@@ -74,11 +95,7 @@ function renderLocaleInfo(locale, comments, gps, me) {
   const facts = [];
   if (locale.description) facts.push(["About", locale.description]);
   facts.push(["Location", `${locale.latitude.toFixed(5)}, ${locale.longitude.toFixed(5)}`]);
-  const mine = me && gps.find((g) => g.user.toLowerCase() === me.toLowerCase());
-  if (mine) {
-    facts.push(["Distance", `${formatDistance(distanceKm(mine.latitude, mine.longitude,
-                                                         locale.latitude, locale.longitude))} from your last location`]);
-  }
+  if (route) facts.push(["Distance", describeRoute(route)]);
   facts.push(["Comments", comments.length
     ? `${comments.length}, latest ${timeAgo(comments[0].time_created)}`
     : "none yet"]);

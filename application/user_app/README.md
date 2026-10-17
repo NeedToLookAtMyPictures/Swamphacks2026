@@ -129,8 +129,24 @@ python global_database.py load sample_global_locales.json
 | GET | `/api/global/trails/<id>.gpx` | a trail's original GPX file |
 | GET | `/api/global/info` | when the global data was loaded |
 | POST | `/api/global/load` | load the data from the server (replaces everything) |
+| GET | `/api/distances?from=&to=` | walking distance along the trails to global locales, nearest first (see below) |
 
-Tests: `python -m unittest test_database`
+### Distances along trails
+
+Distances to locales are measured the way a hiker walks them
+(`trail_distance.py`): straight from where you are to the nearest point on a
+trail, along the global trails (shortest path), then straight from the trail to
+the locale. Trails are connected where they share a point, and where the end of
+one comes within 30 m of another. A locale on a trail that isn't connected to
+yours gets only a straight-line distance.
+
+`GET /api/distances` measures from your last position (`PUT /api/location`), or
+`from=<global locale id>` or `from=<lat>,<lon>`; `to=<global locale id>` limits
+it to one locale. Each locale comes back with `distance` (total), `to_trail`,
+`along_trail`, `from_trail` and `straight`, all in meters (`null` when no trail
+connects), and `path`, the route as `[lat, lon]` points.
+
+Tests: `python -m unittest test_database test_trail_distance`
 
 ## Tabs
 
@@ -139,5 +155,5 @@ Tests: `python -m unittest test_database`
   - **Last known location**: search people and check who to pin, with their name and when they were last seen
   - **Trails**: select a global trail (with search) to draw it on the map and zoom to it; only the selected trail is shown
   - **Locales**: the global locales (shown by default), grouped by category; show or hide a whole category or single locales, with search
-  - Clicking a global locale shrinks the map to the top half and opens a panel below it with information about the site (description, coordinates, distance from your last location, comment count) and its comments, newest first, with a box to add one. Comments are user `locales` records with `location` set to the site's id, so they sync like other records
+  - Clicking a global locale shrinks the map to the top half and opens a panel below it with information about the site (description, coordinates, distance along the trails from your last location, comment count) and its comments, newest first, with a box to add one. Comments are user `locales` records with `location` set to the site's id, so they sync like other records
 - **Debug**: shows every table in the local and global databases (refresh button; offers to create the device if it has no identity yet)

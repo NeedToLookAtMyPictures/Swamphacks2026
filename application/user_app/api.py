@@ -26,6 +26,9 @@ Global data (set by the company, loaded once from the server; users can't change
     GET    /api/global/trails               trails with their lines parsed from GPX
     GET    /api/global/trails/<id>.gpx      a trail's original GPX file
     GET    /api/global/info                 {loaded_at}
+    GET    /api/distances?from=&to=         walking distance along the global trails to global
+                                            locales; from a locale id or "lat,lon" (default:
+                                            this user's position), to a locale id (default: all)
     POST   /api/global/load                 from the server: {locales, trails}; replaces everything
 """
 
@@ -34,6 +37,7 @@ import sqlite3
 from flask import Blueprint, Response, current_app, jsonify, request
 
 from database import SHARED_TABLES, DeviceNotInitialized
+from trail_distance import TrailNetwork
 
 api = Blueprint("api", __name__, url_prefix="/api")
 
@@ -46,6 +50,16 @@ def db():
 
 def global_db():
     return current_app.config["GLOBAL_DATABASE"]
+
+
+def trail_network():
+    """The global trails as a TrailNetwork, rebuilt when the global data is reloaded."""
+    loaded_at = global_db().info()["loaded_at"]
+    cached = current_app.config.get("TRAIL_NETWORK")
+    if cached is None or cached[0] != loaded_at:
+        cached = (loaded_at, TrailNetwork.from_trails(global_db().trails()))
+        current_app.config["TRAIL_NETWORK"] = cached
+    return cached[1]
 
 
 def body(*required):
@@ -212,3 +226,43 @@ def global_info():
 @api.post("/global/load")
 def global_load():
     return jsonify(global_db().load(body("locales")))
+
+
+@api.get("/distances")
+def distances():
+    """Distance to global locales: to the nearest trail, along the trails, then to the locale.
+
+    Nearest first; locales no trail connects to come last, by straight-line distance.
+    """
+    locales = global_db().locales()
+    by_id = {l["id"]: l for l in locales}
+
+    start = request.args.get("from")
+    if start is None:
+        me = db().get_device()
+        if me is None:
+            raise DeviceNotInitialized()
+        position = db().get_location(me["name"])
+        if position is None:
+            return jsonify(error="no position yet; PUT /api/location or pass ?from="), 409
+        origin = (position["latitude"], position["longitude"])
+    elif start in by_id:
+        origin = (by_id[start]["latitude"], by_id[start]["longitude"])
+    else:
+        try:
+            origin = tuple(float(part) for part in start.split(","))
+        except ValueError:
+            origin = ()
+        if len(origin) != 2:
+            raise ValueError('from must be a global locale id or "lat,lon"')
+
+    if "to" in request.args:
+        if request.args["to"] not in by_id:
+            return jsonify(error="no such global locale"), 404
+        locales = [by_id[request.args["to"]]]
+
+    network = trail_network()
+    routes = network.distances(origin, [(l["latitude"], l["longitude"]) for l in locales])
+    results = [{**locale, **route} for locale, route in zip(locales, routes)]
+    results.sort(key=lambda r: (r["distance"] is None, r["distance"] or r["straight"]))
+    return jsonify({"from": origin, "trails": network.bounds is not None, "locales": results})
