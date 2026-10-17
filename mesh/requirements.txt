@@ -1,0 +1,2 @@
+# Python 3.10+. The trailmesh package and tests otherwise use only the standard library.
+pyserial>=3.5  # EspNowSerialLink (USB serial to the ESP32 bridge)

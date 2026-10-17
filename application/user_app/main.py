@@ -8,6 +8,13 @@ Usage:
     python main.py --server ""        # no server address, only look on the wifi
     python main.py --no-lan           # don't look for a server on the wifi
     python main.py --host 0.0.0.0 --https   # on a Raspberry Pi, for a phone to connect to
+
+With an ESP32 running mesh/firmware/espnow_bridge, also sync over the mesh:
+    python main.py --mesh-port /dev/ttyACM0 --mesh-demo
+
+Two hikers on one computer (each with its own database, web port and board):
+    python main.py --db data/alice.db --port 5001 --mesh-port /dev/ttyACM0 --mesh-demo
+    python main.py --db data/bob.db --port 5002 --mesh-port /dev/ttyACM1 --mesh-demo
 """
 
 import argparse
@@ -16,6 +23,10 @@ import json
 import os
 import socket
 import subprocess
+import sys
+import threading
+import time
+from pathlib import Path
 
 from flask import Flask, render_template, send_file
 
@@ -108,7 +119,38 @@ def ensure_certificate():
     print(f"Created a self-signed certificate in {DATA_DIR} for {', '.join(names + ips)}")
 
 
+def start_mesh(db, serial_port, demo):
+    """Run a mesh node on this app's database in a background thread.
+
+    The node starts once the device has a name (set up in the web interface),
+    since the mesh identifies devices by it.
+    """
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "mesh"))
+    from trailmesh import AppStore, Config, Node
+    from trailmesh.espnow_serial import EspNowSerialLink
+
+    def mesh_log(*msg):
+        print("[mesh]", *msg, flush=True)
+
+    def worker():
+        while db.get_device() is None:
+            time.sleep(1)
+        link = EspNowSerialLink(serial_port, log=mesh_log)
+        node = Node(
+            link, AppStore(db), Config(always_on=demo),
+            on_record=lambda r: mesh_log(f"received {r.kind.name.lower()} from the mesh"),
+            on_delivered=lambda origin, seq: mesh_log(f"message {origin}/{seq} was delivered"),
+            on_session_end=lambda s: mesh_log(f"sync with node {s.peer_id:08x} {'ok' if s.ok else 'failed'}"),
+        )
+        mesh_log(f"node {node.id:08x} running on {serial_port}")
+        node.run_forever()
+
+    threading.Thread(target=worker, daemon=True, name="mesh").start()
+
+
 def run(args):
+    if args.db:
+        app.config["DATABASE"] = Database(args.db)
     if not MAP_FILE.exists():
         print("No offline map found. Run `python download_locales.py map` first.")
     app.config["DATABASE"].purge()
@@ -119,6 +161,10 @@ def run(args):
             not args.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true"):
         print(f"Syncing with {finder.describe()} whenever it can be reached")
         server_sync.start(app.config["DATABASE"], finder, app.config["GLOBAL_DATABASE"])
+    if args.mesh_port:
+        if args.debug:
+            sys.exit("--mesh-port can't be combined with --debug (the reloader would open the board twice)")
+        start_mesh(app.config["DATABASE"], args.mesh_port, args.mesh_demo)
     ssl_context = None
     if args.https:
         ensure_certificate()
@@ -141,6 +187,9 @@ def main():
     parser.add_argument("--https", action="store_true",
                         help="serve over HTTPS (needed for GPS when a phone opens the app "
                              "from another device, e.g. a Raspberry Pi over Bluetooth)")
+    parser.add_argument("--db", help="database file (default data/user.db); use one per hiker on a shared computer")
+    parser.add_argument("--mesh-port", help="serial port of an ESP32 running the bridge firmware; syncs over the mesh")
+    parser.add_argument("--mesh-demo", action="store_true", help="mesh radio always on (instant discovery)")
     run(parser.parse_args())
 
 
