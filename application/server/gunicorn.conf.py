@@ -2,7 +2,8 @@
 
     gunicorn server:app
 
-Every setting can be overridden with an environment variable.
+Every setting can be overridden with an environment variable. LAN_DISCOVERY=0
+stops devices on the same wifi from finding the server on their own.
 """
 
 import os
@@ -16,3 +17,16 @@ threads = int(os.environ.get("THREADS", "8"))
 timeout = int(os.environ.get("TIMEOUT", "120"))
 accesslog = "-"
 errorlog = "-"
+
+
+def when_ready(_arbiter):
+    """Once listening, let devices on the same wifi find the server (LAN_DISCOVERY=0
+    turns it off). Runs in the main gunicorn process, so it answers once however
+    many workers there are."""
+    from server import start_lan_discovery
+    try:
+        port = int(bind.rsplit(":", 1)[1])
+    except (IndexError, ValueError):
+        print(f"Wifi discovery is off: can't tell the port from BIND={bind!r}")
+        return
+    start_lan_discovery(port)

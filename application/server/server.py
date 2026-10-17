@@ -7,15 +7,19 @@ plus a users table that keeps names unique.
 Usage:
     gunicorn server:app                  # production (settings in gunicorn.conf.py)
     python server.py                     # development, http://127.0.0.1:8000
+    python server.py --host 0.0.0.0      # development, reachable (and discoverable) on the wifi
+
+Open the server's address in a browser to see everything in its database.
 
 API
-    GET    /api/health                   is the server up
+    GET    /api/health                   is the server up, and its server_id
     POST   /api/register                 reserve a name {name, device_id?} -> {name, device_id}
     POST   /api/sync                     {device_id, name, cursor, records} -> {cursor, records, merged}
     GET    /api/users                    every registered name
     GET    /api/<table>?since=<time>     locales, messages, geolocations, tombstones
 """
 
+import argparse
 import os
 import secrets
 import sqlite3
@@ -23,11 +27,12 @@ import sys
 import time
 from pathlib import Path
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, render_template, request
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "user_app"))  # share database.py with the user app
 
+import discovery  # noqa: E402
 from database import SHARED_TABLES, Database, check_name  # noqa: E402
 
 DB_PATH = Path(os.environ.get("SERVER_DB", HERE / "data" / "server.db"))
@@ -39,6 +44,14 @@ CREATE TABLE IF NOT EXISTS users (
     time_created  REAL NOT NULL,
     last_sync     REAL
 );
+
+-- Exactly one row. Devices keep sync cursors per server_id, so a different server
+-- (or a fresh database) means a full exchange instead of missing records.
+CREATE TABLE IF NOT EXISTS server_info (
+    id            INTEGER PRIMARY KEY CHECK (id = 1),
+    server_id     TEXT NOT NULL,
+    time_created  REAL NOT NULL
+);
 """
 
 
@@ -49,6 +62,9 @@ class Server:
         with self.connect() as conn:
             conn.execute("PRAGMA journal_mode = WAL")  # readers don't block the writer
             conn.executescript(USERS_SCHEMA)
+            conn.execute("INSERT OR IGNORE INTO server_info VALUES (1, ?, ?)",
+                         (secrets.token_hex(4), time.time()))
+            self.server_id = conn.execute("SELECT server_id FROM server_info").fetchone()[0]
 
     def connect(self):
         # The users table lives in the same file, next to the shared tables
@@ -79,7 +95,8 @@ class Server:
                          "VALUES (?, ?, ?)", (name, device_id, time.time()))
             conn.execute("UPDATE users SET last_sync = ? WHERE name = ? AND device_id = ?",
                          (time.time(), name, device_id))
-        return {"cursor": new_cursor, "records": outgoing, "merged": merged}
+        return {"cursor": new_cursor, "records": outgoing, "merged": merged,
+                "server_id": self.server_id}
 
     def list_users(self):
         with self.connect() as conn:
@@ -91,7 +108,7 @@ class NameTaken(Exception):
 
 
 def create_app(path=DB_PATH):
-    app = Flask(__name__)
+    app = Flask(__name__, template_folder=str(HERE / "templates"))
     server = Server(path)
     app.config["SERVER"] = server
 
@@ -116,9 +133,15 @@ def create_app(path=DB_PATH):
     def name_taken(exc):
         return jsonify(error=f"the name {exc} is already taken"), 409
 
+    @app.get("/")
+    def dashboard():
+        """Everything in the server's database, for whoever runs the server."""
+        return render_template("dashboard.html", server_id=server.server_id,
+                               db_path=str(server.db.path), tables=("users",) + SHARED_TABLES)
+
     @app.get("/api/health")
     def health():
-        return jsonify(ok=True, time=time.time())
+        return jsonify(ok=True, time=time.time(), server_id=server.server_id)
 
     @app.post("/api/register")
     def register():
@@ -156,5 +179,25 @@ def create_app(path=DB_PATH):
 app = create_app()
 
 
+def start_lan_discovery(http_port):
+    """Answer devices looking for a server on the wifi (see user_app/discovery.py)."""
+    if os.environ.get("LAN_DISCOVERY", "1") == "0":
+        return
+    try:
+        discovery.start_responder(http_port)
+        print(f"Devices on the same wifi can find this server "
+              f"(UDP port {discovery.DISCOVERY_PORT})")
+    except OSError as exc:
+        print(f"Wifi discovery is off: {exc}")
+
+
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=8000, debug=True)
+    parser = argparse.ArgumentParser(description="Sync server (development)")
+    parser.add_argument("--host", default="127.0.0.1",
+                        help="0.0.0.0 to be reachable, and discoverable, on the wifi")
+    parser.add_argument("--port", type=int, default=8000)
+    args = parser.parse_args()
+    # The debug reloader runs this twice; only the process that serves answers discovery
+    if args.host not in ("127.0.0.1", "localhost") and os.environ.get("WERKZEUG_RUN_MAIN"):
+        start_lan_discovery(args.port)
+    app.run(host=args.host, port=args.port, debug=True)

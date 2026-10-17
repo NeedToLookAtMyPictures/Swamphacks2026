@@ -2,8 +2,9 @@
 
 Device (this user, never shared)
     GET    /api/device                      this device's info
-    POST   /api/device                      create identity {name, device_id?}; name must be unique
-                                            (reserved on the server first when it can be reached)
+    POST   /api/device                      create identity {name}; needs the server (internet or
+                                            its wifi), which reserves the name, then syncs once
+    GET    /api/server                      which server this device syncs with, and when it last did
     PATCH  /api/device                      update mutable fields {last_server_sync}
 
 Records created on this device
@@ -38,7 +39,7 @@ import sqlite3
 from flask import Blueprint, Response, current_app, jsonify, request
 
 import server_sync
-from database import SHARED_TABLES, DeviceNotInitialized
+from database import SHARED_TABLES, DeviceNotInitialized, check_name
 from trail_distance import TrailNetwork
 
 api = Blueprint("api", __name__, url_prefix="/api")
@@ -109,19 +110,39 @@ def init_device():
     if db().get_device() is not None:
         return jsonify(error="device already initialized; its identity is immutable"), 409
     data = body("name")
-    name, device_id = data["name"], data.get("device_id")
-    server_url = current_app.config.get("SERVER_URL")
-    if server_url:
-        # Only the server can guarantee the name is unique. Offline, go ahead anyway.
-        try:
-            reserved = server_sync.register(server_url, name, device_id)
-            name, device_id = reserved["name"], reserved["device_id"]
-        except server_sync.ServerError as exc:
-            return jsonify(error=f"server refused the name: {exc}"), 409
-        except OSError:
-            pass
-    device = db().init_device(name, device_id)
-    return jsonify(device), 201
+    check_name(data["name"])
+    # Only the server can guarantee the name is unique, so an account can only be
+    # made while one can be reached: over the internet (--server) or on its wifi
+    finder = current_app.config.get("SERVER")
+    server_url = finder.find() if finder else None
+    if server_url is None:
+        return jsonify(error="can't reach the server to reserve your name; connect to "
+                             "the internet or to the server's wifi and try again"), 503
+    try:
+        reserved = server_sync.register(server_url, data["name"], data.get("device_id"))
+    except server_sync.ServerError as exc:
+        return jsonify(error=f"server refused the name: {exc}"), 409
+    except OSError:
+        return jsonify(error="lost the server while reserving your name; try again"), 503
+    db().init_device(reserved["name"], reserved["device_id"])
+    # First sync right away, so the new account starts with everyone's data
+    try:
+        server_sync.sync_once(db(), server_url)
+    except (OSError, server_sync.ServerError, ValueError):
+        pass  # the background sync will catch up
+    return jsonify(db().get_device()), 201
+
+
+@api.get("/server")
+def server_status():
+    """Which server this device syncs with, and when it last did."""
+    finder = current_app.config.get("SERVER")
+    device = db().get_device()
+    current = finder.current if finder else None
+    return jsonify(looking_for=finder.describe() if finder else "nothing (offline only)",
+                   url=current[0] if current else None,
+                   via=current[1] if current else None,
+                   last_server_sync=device["last_server_sync"] if device else None)
 
 
 @api.patch("/device")

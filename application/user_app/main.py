@@ -3,7 +3,8 @@
 Usage:
     python download_locales.py map    # once, while online
     python main.py                    # start the web interface (works offline)
-    python main.py --server https://example.com   # also sync whenever the server is reachable
+    python main.py --server https://example.com   # sync with this server when it's reachable
+    python main.py --no-lan           # don't look for a server on the wifi
     python main.py --host 0.0.0.0 --https   # on a Raspberry Pi, for a phone to connect to
 """
 
@@ -32,7 +33,7 @@ KEY_FILE = DATA_DIR / "key.pem"
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
 app.config["DATABASE"] = Database()
-app.config["SERVER_URL"] = None
+app.config["SERVER"] = None  # a server_sync.ServerFinder, set in run()
 app.config["GLOBAL_DATABASE"] = GlobalDatabase()
 app.register_blueprint(api)
 
@@ -101,10 +102,13 @@ def run(args):
     if not MAP_FILE.exists():
         print("No offline map found. Run `python download_locales.py map` first.")
     app.config["DATABASE"].purge()
-    app.config["SERVER_URL"] = args.server
+    finder = server_sync.ServerFinder(args.server, lan=not args.no_lan)
+    app.config["SERVER"] = finder
     # With --debug the reloader runs this twice; only sync from the process that serves
-    if args.server and (not args.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true"):
-        server_sync.start(app.config["DATABASE"], args.server)
+    if (args.server or not args.no_lan) and (
+            not args.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true"):
+        print(f"Syncing with {finder.describe()} whenever it can be reached")
+        server_sync.start(app.config["DATABASE"], finder)
     ssl_context = None
     if args.https:
         ensure_certificate()
@@ -119,7 +123,10 @@ def main():
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--server", default=os.environ.get("SERVER_URL"),
                         help="server to sync with whenever it can be reached "
-                             "(default: $SERVER_URL; leave out to stay offline)")
+                             "(default: $SERVER_URL). Without it, or when it can't be "
+                             "reached, a server on the same wifi is used")
+    parser.add_argument("--no-lan", action="store_true",
+                        help="don't look for a server on the wifi")
     parser.add_argument("--https", action="store_true",
                         help="serve over HTTPS (needed for GPS when a phone opens the app "
                              "from another device, e.g. a Raspberry Pi over Bluetooth)")

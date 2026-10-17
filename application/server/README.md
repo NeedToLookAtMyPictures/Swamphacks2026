@@ -26,13 +26,32 @@ when run in this folder. Override them with environment variables:
 | `TIMEOUT` | `120` | seconds; a device's first sync can be large |
 | `SERVER_DB` | `data/server.db` | database file |
 
-For development without gunicorn: `python server.py` (http://127.0.0.1:8000, debug mode).
+For development without gunicorn: `python server.py` (http://127.0.0.1:8000, debug
+mode), or `python server.py --host 0.0.0.0` to be reachable on the wifi.
 
-Then point the user app at it:
+## Viewing the database
+
+Open the server's address in a browser (http://localhost:8000 on the machine
+running it). The page shows every table: `users` and the four shared tables,
+newest first, refreshing every 5 seconds. Like the rest of the API it has no
+login, so anyone who can reach the server can see it.
+
+## Connecting devices
+
+**Same wifi:** nothing to configure. The server answers UDP broadcasts on port
+8765 (`user_app/discovery.py`), and a user app started without `--server` asks
+the wifi for a server every time it syncs. Some networks (many campus and hotel
+wifis) block devices from talking to each other; there, use the server's address
+instead. Set `LAN_DISCOVERY=0` to stop the server answering.
+
+**By address:**
 
 ```bash
 python main.py --server http://<server-ip>:8000
 ```
+
+With `--server`, that server is tried first and one on the wifi is the fallback
+(`--no-lan` turns the fallback off).
 
 To reach the server from outside your network, run it on a VPS, or expose it
 with a tunnel such as `cloudflared tunnel --url http://localhost:8000` or
@@ -40,8 +59,8 @@ with a tunnel such as `cloudflared tunnel --url http://localhost:8000` or
 
 ## How syncing works
 
-While the user app runs with `--server`, it tries the server every 30 seconds
-(`user_app/server_sync.py`). Offline, the request fails quietly. As soon as the
+While the user app runs, it looks for a server every 30 seconds
+(`user_app/server_sync.py`). Offline, the request fails quietly. As soon as a
 server answers, the app:
 
 1. sends every record that **arrived on the device** since its last push. This
@@ -54,7 +73,12 @@ Each cursor uses the clock of the machine it describes (`last_push` the device's
 also re-sends the last 60 seconds, so records written while a sync is running
 aren't skipped. Merging is idempotent, so the repeats are harmless.
 
-The server is a relay: it has no identity of its own and never marks messages
+Every server has a random `server_id`, kept in its database. The device saves the
+ID its cursors belong to, so when it syncs with a different server (say the
+internet one, then one on the wifi), it exchanges everything once instead of
+missing records the new server never got.
+
+The server is a relay: it has no user identity of its own and never marks messages
 delivered. Delivery still happens on the receiver's device, and its `delivered`
 tombstone travels back through the server to everyone else.
 
@@ -62,15 +86,18 @@ tombstone travels back through the server to everyone else.
 
 | Method | Path | What it does |
 |---|---|---|
-| GET | `/api/health` | is the server up |
+| GET | `/` | page showing the whole database |
+| GET | `/api/health` | is the server up, and its `server_id` |
 | POST | `/api/register` | reserve a name `{name, device_id?}` → `{name, device_id}`; 409 if taken |
-| POST | `/api/sync` | `{device_id, name, cursor, records}` → `{cursor, records, merged}` |
+| POST | `/api/sync` | `{device_id, name, cursor, records}` → `{cursor, records, merged, server_id}` |
 | GET | `/api/users` | every registered name |
 | GET | `/api/<table>?since=<time>` | `locales`, `messages`, `geolocations`, `tombstones` |
 
-When the user app creates its identity (`POST /api/device`) with a server
-configured, it registers the name on the server first. If the server can't be
-reached, the device is created offline and its name is registered the first
-time it syncs.
+Creating an account in the user app (`POST /api/device`) needs a server: over
+the internet with `--server`, or on the same wifi. The server reserves the name
+and hands out the device ID, then the device syncs once so it starts with
+everyone's data. With no server reachable, account creation is refused (503).
+Devices created offline by older versions are still registered the first time
+they sync.
 
 Tests: `python -m unittest test_server`

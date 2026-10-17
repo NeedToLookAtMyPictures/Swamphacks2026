@@ -36,14 +36,20 @@ python download_locales.py map --source some-local-file.pmtiles
 ```bash
 python main.py                       # http://127.0.0.1:5000
 python main.py --host 0.0.0.0        # reachable from other devices on the LAN
-python main.py --server http://<server>:8000   # also sync with the server whenever it's reachable
+python main.py --host 0.0.0.0 --https   # same, over HTTPS (needed for GPS, see below)
+python main.py --server http://<server>:8000   # sync with this server when it's reachable
+python main.py --no-lan              # don't look for a server on the wifi
 ```
 
-With `--server` (or `SERVER_URL` set), a background thread tries the server every
-30 seconds and syncs whenever it answers. The app keeps working offline. See
+A background thread looks for a server every 30 seconds and syncs whenever one
+answers: the one given with `--server` (or `SERVER_URL`), or else one on the
+same wifi, found automatically. The app keeps working offline. See
 `../server/README.md`.
-python main.py --host 0.0.0.0 --https   # same, over HTTPS (needed for GPS, see below)
-```
+
+**Creating an account needs the server.** Names must be unique, and only the
+server can guarantee that, so the Debug tab's "Create device" only works while
+a server can be reached (internet or its wifi). The server reserves the name,
+and the device syncs once right away.
 
 ### Raspberry Pi + phone over Bluetooth
 
@@ -76,7 +82,7 @@ Configuration issue:
 | `messages` | yes | (origin_id, seq) | dead after 31 days or once delivered |
 | `geolocations` | yes | user | newest position wins; ties go to the higher device ID |
 | `tombstones` | yes | (origin_id, seq) | kills the target message; deleted after 31 days |
-| `device_info` | **no** | single row | `device_id` and `name` are immutable; `next_seq`, `last_server_sync`, `last_push`, `server_cursor` |
+| `device_info` | **no** | single row | `device_id` and `name` are immutable; `next_seq`, `last_server_sync`, `last_push`, `server_cursor`, `server_id` |
 
 Every record this device creates gets `origin_id = device_id` and the next
 `seq`.
@@ -95,8 +101,8 @@ Messages are addressed to a name, so you can send to someone you've
 encountered or to any name at all; the message is passed from device to device
 until the one with that name sees it. A message with receiver `*` goes to
 **everyone**: nobody marks it delivered, so it spreads until it expires after 31
-days. (`*` isn't a valid name, so no person can be called that.) Offline, the app can only refuse names
-it has already seen, so real uniqueness has to come from the server at setup.
+days. (`*` isn't a valid name, so no person can be called that.) Names are reserved on the server
+when the account is created, which is why that needs a server.
 
 A `data/user.db` from schema 2 or 3 is upgraded automatically; anything older has to be deleted. Expired messages are deleted, except on the sender's and receiver's
 devices, where they're kept (marked dead) but no longer shared.
@@ -108,7 +114,8 @@ All endpoints take and return JSON. Full list in `api.py`.
 | Method | Path | What it does |
 |---|---|---|
 | GET | `/api/device` | this device's info |
-| POST | `/api/device` | create identity once: `{name, device_id?}` (`device_id` is generated if left out; the name is reserved on the server first if it can be reached) |
+| POST | `/api/device` | create identity once: `{name}`; needs a server, which reserves the name and hands out the `device_id` (503 when none can be reached, 409 when the name is taken) |
+| GET | `/api/server` | which server this device syncs with (`via`: `configured` or `wifi`) and when it last did |
 | PATCH | `/api/device` | update mutable fields: `{last_server_sync}` |
 | POST | `/api/locales` | `{location, name, comment?}` |
 | POST | `/api/messages` | `{receiver, content}`: `receiver` is a name, or `*` for everyone |

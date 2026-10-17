@@ -5,12 +5,44 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from flask import Flask
 
+import server_sync
 from api import api
 from database import MESSAGE_TTL, SCHEMA, Database, DeviceNotInitialized
 from global_database import GlobalDatabase
+
+
+class FakeServer:
+    """Stands in for the sync server, so account creation can reserve names."""
+
+    def __init__(self, reachable=True):
+        self.reachable = reachable
+        self.names = {}
+        self.current = None
+
+    def find(self):
+        return "http://fake" if self.reachable else None
+
+    def describe(self):
+        return "a fake server"
+
+    def register(self, _url, name, device_id=None):
+        if name.lower() in self.names and self.names[name.lower()] != device_id:
+            raise server_sync.ServerError("409: taken")
+        self.names[name.lower()] = device_id or "d-" + name.lower()
+        return {"name": name, "device_id": self.names[name.lower()]}
+
+    def install(self, app, test):
+        """Use this as app's server for the rest of the test."""
+        app.config["SERVER"] = self
+        for name, fake in (("register", self.register),
+                           ("sync_once", lambda _db, _url: None)):
+            patcher = mock.patch.object(server_sync, name, fake)
+            patcher.start()
+            test.addCleanup(patcher.stop)
 
 
 def make_db(tmp, name, device_id):
@@ -122,6 +154,17 @@ class DatabaseTest(unittest.TestCase):
         db.init_device("erin")
         self.assertIsNone(db.update_device(last_push=5.0)["server_cursor"])
 
+    def test_schema_4_gains_server_id(self):
+        path = Path(self.tmp.name) / "v4.db"
+        with sqlite3.connect(path) as conn:
+            conn.executescript(SCHEMA)
+            conn.execute("ALTER TABLE device_info DROP COLUMN server_id")
+            conn.execute("PRAGMA user_version = 4")
+        conn.close()
+        db = Database(path)
+        db.init_device("erin")
+        self.assertEqual(db.update_device(server_id="s1")["server_id"], "s1")
+
     def test_dead_message_is_not_picked_up(self):
         msg = self.alice.add_message("bob", "hi")
         self.bob.merge(self.alice.export())     # delivered on arrival
@@ -228,6 +271,8 @@ class ApiTest(unittest.TestCase):
         app.config["GLOBAL_DATABASE"] = GlobalDatabase(Path(self.tmp.name) / "global.db")
         app.register_blueprint(api)
         self.client = app.test_client()
+        self.server = FakeServer()
+        self.server.install(app, self)
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -271,6 +316,22 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(c.get("/api/nope").status_code, 404)
         self.assertEqual(c.post("/api/sync", json={"nope": []}).status_code, 400)
         self.assertEqual(c.post("/api/sync", json={"messages": [{"seq": 1}]}).status_code, 400)
+
+    def test_account_needs_the_server(self):
+        c = self.client
+        self.server.reachable = False
+        r = c.post("/api/device", json={"name": "alice"})
+        self.assertEqual(r.status_code, 503)
+        self.assertIn("server", r.json["error"])
+        self.assertEqual(c.get("/api/device").status_code, 409)  # nothing was created
+        self.server.reachable = True
+        self.server.register("x", "alice", "d-someone-else")
+        self.assertEqual(c.post("/api/device", json={"name": "ALICE"}).status_code, 409)
+        self.assertEqual(c.post("/api/device", json={"name": "two words"}).status_code, 400)
+        r = c.post("/api/device", json={"name": "bob"})
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(r.json["device_id"], "d-bob")  # the ID the server handed out
+        self.assertEqual(c.get("/api/server").json["looking_for"], "a fake server")
 
     def test_global_load(self):
         c = self.client

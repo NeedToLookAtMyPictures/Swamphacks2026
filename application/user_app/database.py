@@ -25,7 +25,7 @@ TOMBSTONE_TTL = 2_678_400  # 31 days, in seconds
 # Each sync re-sends records from this long before the cursor, so a record written
 # while a sync was running isn't skipped. Merging is idempotent, so repeats are harmless.
 SYNC_OVERLAP = 60  # seconds
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 # Names are people's addresses: short (they go over LoRa) and compared ignoring case
 NAME_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
@@ -89,7 +89,8 @@ CREATE TABLE IF NOT EXISTS device_info (
     time_created     REAL    NOT NULL,
     last_server_sync REAL,              -- NULL until the first server sync
     last_push        REAL,              -- this device's clock: sent the server everything received before this
-    server_cursor    REAL               -- the server's clock: got everything it received before this
+    server_cursor    REAL,              -- the server's clock: got everything it received before this
+    server_id        TEXT               -- the server the two cursors above belong to
 );
 
 CREATE TRIGGER IF NOT EXISTS device_info_immutable
@@ -144,7 +145,7 @@ class Database:
         with self._connect() as conn:
             version = conn.execute("PRAGMA user_version").fetchone()[0]
             has_tables = conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table'").fetchone()
-            if has_tables and version in (2, 3):
+            if has_tables and version in (2, 3, 4):
                 self._add_missing_columns(conn)
             elif has_tables and version != SCHEMA_VERSION:
                 raise RuntimeError(f"{self.path} uses an old schema; delete it and restart")
@@ -153,11 +154,13 @@ class Database:
 
     @staticmethod
     def _add_missing_columns(conn):
-        """Upgrade schema 2 (no messages.received) and 3 (no server sync cursors)."""
+        """Upgrade schema 2 (no messages.received), 3 (no server sync cursors)
+        and 4 (no server_id)."""
         for table, column, definition in (
                 ("messages", "received", "INTEGER NOT NULL DEFAULT 0"),
                 ("device_info", "last_push", "REAL"),
-                ("device_info", "server_cursor", "REAL")):
+                ("device_info", "server_cursor", "REAL"),
+                ("device_info", "server_id", "TEXT")):
             existing = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
             if column not in existing:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
@@ -200,11 +203,12 @@ class Database:
             )
         return self.get_device()
 
-    def update_device(self, last_server_sync=None, last_push=None, server_cursor=None):
+    def update_device(self, last_server_sync=None, last_push=None, server_cursor=None,
+                      server_id=None):
         """Update the mutable device fields. Fields left as None are unchanged."""
         self._require_device()
         fields = dict(last_server_sync=last_server_sync, last_push=last_push,
-                      server_cursor=server_cursor)
+                      server_cursor=server_cursor, server_id=server_id)
         with self._connect() as conn:
             for column, value in fields.items():
                 if value is not None:
