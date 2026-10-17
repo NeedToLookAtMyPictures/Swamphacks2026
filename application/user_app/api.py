@@ -52,6 +52,15 @@ def db():
     return current_app.config["DATABASE"]
 
 
+@api.after_request
+def sync_soon(response):
+    """Anything written here (a message, a comment, a position) goes to the server now
+    rather than at the next scheduled sync, so the other person sees it sooner."""
+    if request.method != "GET" and response.status_code < 400:
+        server_sync.wake()
+    return response
+
+
 def global_db():
     return current_app.config["GLOBAL_DATABASE"]
 

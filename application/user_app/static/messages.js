@@ -236,7 +236,7 @@ document.getElementById("compose").addEventListener("submit", async (e) => {
 });
 
 // Pick up messages that arrive or get delivered in the background (sync, other devices)
-const MESSAGES_REFRESH_MS = 3000;
+const MESSAGES_REFRESH_MS = 1000;
 setInterval(() => {
   if (document.getElementById("messages").classList.contains("active") && !document.hidden) {
     loadMessages().catch(() => {});  // the local app is always reachable; try again next time

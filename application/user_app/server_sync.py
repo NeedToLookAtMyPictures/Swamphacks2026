@@ -6,7 +6,8 @@ Once it reaches one, it syncs with it every SYNC_EVERY seconds: the device sends
 the records that arrived since its last push and merges what the server got
 since its last pull. When the server's global data (water sources, campsites,
 trails) differs from the device's copy, it comes along and replaces it. If a
-sync fails, it goes back to looking.
+sync fails, it goes back to looking. Writing something locally (wake()) or
+receiving something new syncs again right away instead of waiting.
 
 Only the standard library is used, so the app has no extra dependency.
 """
@@ -23,6 +24,14 @@ SYNC_EVERY = 5     # seconds between syncs while a server answers
 CHECK_EVERY = 30   # seconds between looking for a server while there is none
 TIMEOUT = 15       # seconds, for a sync
 PING_TIMEOUT = 3   # seconds, for checking whether a server is there
+
+# Set to sync right away instead of at the next SYNC_EVERY, e.g. after sending a message
+_wake = threading.Event()
+
+
+def wake():
+    """Sync now: something was written here that other devices should get soon."""
+    _wake.set()
 
 
 class ServerError(Exception):
@@ -148,6 +157,8 @@ class SyncLoop:
             return CHECK_EVERY
         if merged and any(merged.values()):
             print(f"Synced with server: {merged}")
+            # Merging may have created records (a 'delivered' tombstone): send them now
+            return 0
         return SYNC_EVERY
 
 
@@ -157,7 +168,12 @@ def start(db, finder, global_db=None):
 
     def loop():
         while True:
-            time.sleep(sync.step())
+            delay = sync.step()
+            if delay and sync.url is not None:  # no point waking up early with no server
+                _wake.wait(delay)
+            else:
+                time.sleep(delay)
+            _wake.clear()
 
     thread = threading.Thread(target=loop, name="server-sync", daemon=True)
     thread.start()

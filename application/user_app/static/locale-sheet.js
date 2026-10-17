@@ -11,7 +11,7 @@ let sheetLocale = null;  // the global locale shown in the sheet, or null when c
 let routeLayer = null;   // the route to the locale in the sheet
 let sheetSnapshot = null;  // JSON of the data last drawn, so refreshes skip unchanged redraws
 
-const SHEET_REFRESH_MS = 3000;
+const SHEET_REFRESH_MS = 1000;
 
 function sheetEl(tag, text, className) {
   const node = document.createElement(tag);
