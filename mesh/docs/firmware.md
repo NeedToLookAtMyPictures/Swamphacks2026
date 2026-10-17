@@ -14,7 +14,7 @@ the partner filter from issue #2 ("ESP-NOW packet filtering").
 | Name | Value | Notes |
 |---|---|---|
 | `CHANNEL` | 6 | **All devices must use the same Wi-Fi channel** (6 matches esp-now-modem) |
-| `BAUD` | 460800 | Ignored by native-USB boards (Feather S3). Must match `EspNowSerialLink` on boards with a USB-UART chip. |
+| `BAUD` | 460800 | Ignored on the ESP32-S3's native USB, which all our boards now use. Only mattered for the old ESP-WROOM boards with a USB-UART chip. |
 | Receive queue | 32 items | Frames are dropped (and counted) if the host falls behind |
 
 ## Control flow
@@ -148,6 +148,21 @@ Tested on two Feather S3s, with core 3.3.12, on 2026-10-17:
 - `run_node.py --demo`: a locale update synced in one session.
 - A 50 KB image arrived intact in 4.1 s, discovery included (about 12 KB/s). There were
   0 send errors, 0 dropped frames, and 295 frames in each direction.
+
+## Flashing a generic ESP32-S3FN8 board
+
+ESP32-S3FN8 is the chip (8 MB flash inside, no PSRAM). With a board that has no
+board definition of its own, use **ESP32S3 Dev Module** and set:
+
+- **USB CDC On Boot: Enabled.** Required. The default on this board definition
+  is Disabled, which sends `Serial` to the UART pins instead of the USB port,
+  and the host then hears nothing.
+- **USB Mode:** either works. Both present the same USB CDC interface to the
+  host (laptops and Android).
+- **Flash Size: 8MB**, PSRAM: Disabled.
+
+If the board has two USB ports, plug into the one wired to the chip's own USB
+(usually labeled USB, not UART/COM).
 
 ## Things to verify on first flash
 
