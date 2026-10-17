@@ -19,6 +19,7 @@ Two hikers on one computer (each with its own database, web port and board):
 
 import argparse
 import ipaddress
+import logging
 import os
 import socket
 import subprocess
@@ -134,7 +135,18 @@ def start_mesh(db, serial_port, demo):
     threading.Thread(target=worker, daemon=True, name="mesh").start()
 
 
+class HideRoutineRequests(logging.Filter):
+    """The page re-reads the database every second or so; logging each of those
+    requests buries the sync and [mesh] lines. Writes and errors are still shown."""
+
+    def filter(self, record):
+        message = record.getMessage()
+        return not ('"GET ' in message and ('" 200 ' in message or '" 304 ' in message))
+
+
 def run(args):
+    if not args.log_requests:
+        logging.getLogger("werkzeug").addFilter(HideRoutineRequests())
     if args.db:
         app.config["DATABASE"] = Database(args.db)
     if not MAP_FILE.exists():
@@ -163,6 +175,8 @@ def main():
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=5000)
     parser.add_argument("--debug", action="store_true")
+    parser.add_argument("--log-requests", action="store_true",
+                        help="also log every successful GET (hidden by default: the page polls)")
     parser.add_argument("--server", default=os.environ.get("SERVER_URL", DEFAULT_SERVER_URLS),
                         help="servers to sync with whenever one can be reached, comma-separated "
                              f"and tried in order (default: $SERVER_URL, else {DEFAULT_SERVER_URLS}; "

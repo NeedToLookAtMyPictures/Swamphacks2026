@@ -44,7 +44,15 @@ python main.py --server http://<server>:8000   # sync with another server
 python main.py --server https://a.example,http://10.0.0.5:8000   # several, tried in order
 python main.py --server ""           # no server address, only look on the wifi
 python main.py --no-lan              # don't look for a server on the wifi
+python main.py --mesh-port /dev/ttyACM0 --mesh-demo   # also sync over an ESP32 (see ../../mesh)
+python main.py --server "" --no-lan --mesh-port /dev/ttyACM0 --mesh-demo   # mesh only, to test it
+python main.py --log-requests        # also log every successful GET (hidden: the page polls)
 ```
+
+With a server and the mesh both running, the server usually gets data to the
+other device first. Two devices that already hold the same data skip the mesh
+exchange (their beacons' digests match), so there are no handshakes to see. To
+watch the mesh on its own, run both devices with `--server "" --no-lan`.
 
 A background thread looks for a server every 30 seconds, and while one answers
 it syncs every 5 seconds, and right away when you send something or a sync brings
