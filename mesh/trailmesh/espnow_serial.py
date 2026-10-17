@@ -125,11 +125,13 @@ class EspNowSerialLink(Link):
             raise
         with self._lock:
             self._ser = ser
-        # Clear any partner filter left over from an interrupted session, restore
-        # the radio state, and ask who we're talking to.
+        self._restore()
+        self._write(bytes([CMD_GET_INFO]))
+
+    def _restore(self) -> None:
+        """Clear any partner filter left over from an interrupted session and restore the radio state."""
         self._write(bytes([CMD_SET_PARTNER]) + struct.pack("<I", self._partner or 0))
         self._write(bytes([CMD_RADIO, 1 if self._radio_wanted else 0]))
-        self._write(bytes([CMD_GET_INFO]))
 
     def _lost(self, err: Exception) -> None:
         with self._lock:
@@ -184,11 +186,14 @@ class EspNowSerialLink(Link):
                 if msg[0] == EVT_RECV and len(msg) >= 8:
                     self._rx.put(RxFrame(msg[8:], msg[1:7], struct.unpack("b", msg[7:8])[0]))
                 elif msg[0] == EVT_INFO and len(msg) >= 7:
-                    self.mac = msg[1:7]
-                    if len(msg) >= 7 + STATUS.size:
-                        self.status = dict(zip(STATUS_FIELDS, STATUS.unpack_from(msg, 7)))
+                    self._on_info(msg)
                 elif msg[0] == EVT_LOG:
                     self._emit("[esp32]", msg[1:].decode(errors="replace"))
+
+    def _on_info(self, msg: bytes) -> None:
+        self.mac = msg[1:7]
+        if len(msg) >= 7 + STATUS.size:
+            self.status = dict(zip(STATUS_FIELDS, STATUS.unpack_from(msg, 7)))
 
     def send(self, payload: bytes, dest: bytes | None = None) -> None:
         if len(payload) > self.mtu:

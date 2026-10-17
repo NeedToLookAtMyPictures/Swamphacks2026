@@ -16,7 +16,8 @@ import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from trailmesh.espnow_serial import CMD_GET_INFO, EspNowSerialLink  # noqa: E402
+from trailmesh.espnow_serial import CMD_GET_INFO  # noqa: E402
+from trailmesh.radio import LINKS, open_link  # noqa: E402
 from trailmesh.wire import Frame  # noqa: E402
 
 PING_MAGIC = b"\x00\x00\x00\x00DIAG"  # sender id 0 never decodes as a real trailmesh device
@@ -39,10 +40,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", required=True)
     ap.add_argument("--seconds", type=float, default=30)
+    ap.add_argument("--link", choices=LINKS, default="espnow", help="espnow_bridge or lora_bridge firmware")
+    ap.add_argument("--sf", type=int, default=7, help="LoRa spreading factor 7-12 (all boards must match)")
     args = ap.parse_args()
 
     logs = []
-    link = EspNowSerialLink(args.port, log=lambda *a: logs.append(" ".join(map(str, a))))
+    link = open_link(args.link, args.port, sf=args.sf, log=lambda *a: logs.append(" ".join(map(str, a))))
     try:
         print(f"[1/2] Asking the board on {args.port} for its MAC...")
         deadline = time.time() + 5
@@ -67,7 +70,11 @@ def main():
             print(f"      FAIL: radio did not start (last error {st['last_err']:#x}); see the firmware log lines above.")
             return 1
         else:
-            print(f"      radio on, channel {st['channel']}")
+            lora = getattr(link, "lora_status", None)
+            if lora:
+                print(f"      radio on, {lora['freq_hz'] / 1e6:.3f} MHz, {lora['bw_hz'] // 1000} kHz, SF{lora['sf']}")
+            else:
+                print(f"      radio on, channel {st['channel']}")
 
         print(f"[2/2] Broadcasting a test ping every second for {args.seconds:.0f} s; listening for the other board...")
         heard = set()

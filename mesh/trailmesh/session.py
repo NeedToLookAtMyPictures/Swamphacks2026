@@ -2,14 +2,19 @@
 
 Both sides run the same steps after the handshake:
 
-  1. cutoff = min(my last server sync, peer's last server sync)
+  1. cutoff = min(my last server sync, peer's last server sync), raised to
+     `since` (my last good sync with this peer) when the Node passes one
   2. send INV: metadata of every record eligible under the cutoff
   3. on the peer's full INV: send WANT with the ids I'm missing
   4. on the peer's full WANT: send those records as DATA chunks (by priority), then DONE
   5. finished once my DONE is acked and the peer's DONE has arrived
 
 This is a sans-IO state machine: it never touches the radio or the clock
-directly, which keeps it testable and link-agnostic (ESP-NOW now, LoRa later).
+directly, which keeps it testable and link-agnostic (ESP-NOW and LoRa).
+
+ACKs go out at once by default. With `config.ack_delay` > 0 (LoRa, where only
+one side can transmit at a time), the receiver waits until the sender's burst
+is over and confirms it with one cumulative + selective ACK.
 """
 from __future__ import annotations
 
@@ -63,6 +68,8 @@ class Session:
         now: float,
         peer_sync: int | None = None,
         on_record: Callable[[Record], None] | None = None,
+        since: float | None = None,
+        exclude: frozenset = frozenset(),
     ):
         self.my_id = my_id
         self.peer_id = peer_id
@@ -70,11 +77,19 @@ class Session:
         self.initiator = initiator
         self.store = store
         self.cfg = config
-        self.mtu = min(mtu, MAX_FRAME)  # every frame we build fits one ESP-NOW packet
+        self.mtu = min(mtu, MAX_FRAME)  # every frame we build fits one ESP-NOW or LoRa packet
         self._send = send
         self._on_record = on_record
         self.started = now
         self.last_heard = now
+        # Change-only inventory: offer only what arrived after `since` (store clock),
+        # minus `exclude` (ids this peer sent us last time).
+        self.since = since
+        self.exclude = exclude
+        self.inventory_time: float | None = None  # store clock when our INV was built
+        self.got_ids: set[bytes] = set()  # records the peer sent us completely, kept or not
+        self._ack_first: float | None = None  # first reliable frame not yet acked (delayed ACKs)
+        self._ack_last = 0.0
 
         self.sender = ReliableSender(config.window_frames, config.rto, config.max_retries)
         self.receiver = ReliableReceiver()
@@ -96,7 +111,7 @@ class Session:
             self._send_hello(now)
         else:
             self.state = State.ACTIVE
-            self._send_ctrl(T.HELLO_ACK, HELLO.pack(PROTOCOL_VERSION, store.last_server_sync))
+            self._send_ctrl(T.HELLO_ACK, HELLO.pack(PROTOCOL_VERSION, store.last_server_sync, peer_id))
             self._activate(peer_sync or 0)
 
     @property
@@ -107,6 +122,11 @@ class Session:
     def ok(self) -> bool:
         return self.state is State.DONE
 
+    @property
+    def delta(self) -> bool:
+        """True if our INV listed only what changed since the last sync with this peer."""
+        return self.since is not None
+
     # Inbound ----------------------------------------------------------------
 
     def on_frame(self, f: Frame, now: float) -> None:
@@ -114,11 +134,11 @@ class Session:
         if f.type is T.HELLO:
             # Our HELLO_ACK was lost and the initiator is retrying.
             if not self.initiator:
-                self._send_ctrl(T.HELLO_ACK, HELLO.pack(PROTOCOL_VERSION, self.store.last_server_sync))
+                self._send_ctrl(T.HELLO_ACK, HELLO.pack(PROTOCOL_VERSION, self.store.last_server_sync, self.peer_id))
             return
         if f.type is T.HELLO_ACK:
             if self.state is State.CONNECTING and len(f.payload) >= HELLO.size:
-                _version, peer_sync = HELLO.unpack_from(f.payload)
+                _version, peer_sync, _target = HELLO.unpack_from(f.payload)
                 self.state = State.ACTIVE
                 self._activate(peer_sync)
             return
@@ -131,7 +151,12 @@ class Session:
             for g in self.receiver.on_frame(f):
                 if not self.finished:
                     self._deliver(g)
-            self._send_ctrl(T.ACK, self.receiver.ack_payload())
+            if self.finished or self.cfg.ack_delay <= 0:
+                self._send_ctrl(T.ACK, self.receiver.ack_payload())
+            else:
+                if self._ack_first is None:
+                    self._ack_first = now
+                self._ack_last = now
 
     def _deliver(self, f: Frame) -> None:
         if f.type is T.INV:
@@ -166,6 +191,7 @@ class Session:
             if len(chunks) == count:
                 del self._partial[rid]
                 self._wanted.discard(rid)
+                self.got_ids.add(rid)
                 blob = b"".join(chunks[i] for i in range(count))
                 # Ids name a row, not its contents, so a CRC32 guards the bytes.
                 if len(blob) < 4 or zlib.crc32(blob[4:]) != int.from_bytes(blob[:4], "little"):
@@ -187,7 +213,11 @@ class Session:
 
     def _activate(self, peer_sync: int) -> None:
         cutoff = min(self.store.last_server_sync, peer_sync)
-        entries = [INV_ENTRY.pack(rid, kind, created) for rid, kind, created in self.store.inventory(cutoff)]
+        if self.since is not None:
+            cutoff = max(cutoff, self.since)
+        self.inventory_time = self.store.now()
+        inventory = self.store.inventory(cutoff, self.exclude)
+        entries = [INV_ENTRY.pack(rid, kind, created) for rid, kind, created in inventory]
         self._queue_list(T.INV, entries, INV_ENTRY.size)
 
     def _queue_list(self, typ: T, items: list[bytes], item_size: int) -> None:
@@ -231,10 +261,20 @@ class Session:
     def _send_ctrl(self, typ: T, payload: bytes) -> None:
         self._send(Frame(self.my_id, typ, 0, self.id, 0, payload))
 
+    # TODO: piggyback ACKs on our own DATA frames, so a bidirectional LoRa exchange
+    # doesn't spend a separate frame (and a channel turn) on each ACK.
+    def _flush_ack(self, now: float, force: bool = False) -> None:
+        """Send the delayed ACK once the peer has paused (its burst is over), or it has waited too long."""
+        if self._ack_first is None:
+            return
+        if force or now - self._ack_last >= self.cfg.ack_delay or now - self._ack_first >= self.cfg.ack_max:
+            self._ack_first = None
+            self._send_ctrl(T.ACK, self.receiver.ack_payload())
+
     def _send_hello(self, now: float) -> None:
         self._hello_tries += 1
         self._hello_at = now
-        self._send_ctrl(T.HELLO, HELLO.pack(PROTOCOL_VERSION, self.store.last_server_sync))
+        self._send_ctrl(T.HELLO, HELLO.pack(PROTOCOL_VERSION, self.store.last_server_sync, self.peer_id))
 
     # Timers -----------------------------------------------------------------
 
@@ -251,6 +291,7 @@ class Session:
                 else:
                     self._send_hello(now)
             return
+        self._flush_ack(now)
         try:
             for f in self.sender.due(now):
                 self._send(f)
@@ -261,7 +302,9 @@ class Session:
                 self.state = State.DONE
             else:
                 self.state = State.FAILED
+            self._flush_ack(now, force=True)
             return
         self._pump(now)
         if self.peer_done and self._done_queued and self.sender.idle:
             self.state = State.DONE
+            self._flush_ack(now, force=True)  # the peer is waiting for the ACK of its DONE

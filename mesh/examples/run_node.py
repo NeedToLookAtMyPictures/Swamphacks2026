@@ -1,4 +1,4 @@
-"""Run one trailmesh node against a real ESP32 running firmware/espnow_bridge.
+"""Run one trailmesh node against a real ESP32 running firmware/espnow_bridge (or lora_bridge: --link lora).
 
 The node syncs the user app's database (application/user_app/data/user.db by
 default), so run it next to the app. Set the device up once in the app first
@@ -22,8 +22,8 @@ sys.path.insert(0, os.path.join(HERE, "..", "..", "application", "user_app"))
 
 from database import DEFAULT_DB_PATH, Database  # noqa: E402  (the app's database)
 
-from trailmesh import AppStore, Config, Node, Record  # noqa: E402
-from trailmesh.espnow_serial import EspNowSerialLink  # noqa: E402
+from trailmesh import AppStore, Node, Record  # noqa: E402
+from trailmesh.radio import LINKS, config_for, open_link  # noqa: E402
 from trailmesh.wire import Frame  # noqa: E402
 
 
@@ -61,6 +61,8 @@ def main():
     ap.add_argument("--db", default=str(DEFAULT_DB_PATH), help="the app's database file")
     ap.add_argument("--name", help="create the device with this name if it isn't set up yet")
     ap.add_argument("--demo", action="store_true", help="radio always on")
+    ap.add_argument("--link", choices=LINKS, default="espnow", help="espnow_bridge or lora_bridge firmware")
+    ap.add_argument("--sf", type=int, default=7, help="LoRa spreading factor 7-12 (all boards must match)")
     ap.add_argument("--verbose", action="store_true", help="print every frame sent and received")
     args = ap.parse_args()
 
@@ -81,10 +83,10 @@ def main():
         print(f"session with {s.peer_id} {'ok' if s.ok else 'FAILED'}: "
               f"got {s.records_received}, sent {s.records_sent}")
 
-    link = EspNowSerialLink(args.port)
+    link = open_link(args.link, args.port, sf=args.sf)
     if args.verbose:
         trace(link)
-    node = Node(link, store, Config(always_on=args.demo), on_record=on_record, on_delivered=on_delivered,
+    node = Node(link, store, config_for(link, always_on=args.demo), on_record=on_record, on_delivered=on_delivered,
                 on_session_end=on_end)
     print(f"node {db.get_device()['name']} (mesh id {node.id:08x}) running, digest {store.digest().hex()}; "
           "ctrl-c to stop")

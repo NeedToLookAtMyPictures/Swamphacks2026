@@ -14,8 +14,11 @@ mesh/
     node.py          duty-cycled discovery, beacons, one session at a time, cooldowns
     link.py          Link interface (ESP-NOW now, LoRa later)
     espnow_serial.py Link over USB serial to the bridge firmware (needs pyserial)
+    lora_serial.py   the same over LoRa (firmware/lora_bridge); lora.py: radio settings, airtime
+    radio.py         open_link('espnow' | 'lora', port) and the Config that suits it
     sim.py           simulated radio + virtual clock for tests/demos
   firmware/espnow_bridge/  Arduino sketch for the ESP32 bridge
+  firmware/lora_bridge/    Arduino sketch for a Heltec LoRa 32 V3 (SX1262), see docs/lora.md
   examples/run_node.py     run a node against real hardware
   tests/                   python -m unittest discover -s tests
 ```
@@ -86,10 +89,9 @@ tombstoned. Messages and tombstones expire after 31 days. See
   time in the cutoff. The app's own `/api/sync?since=` still counts only
   creation time.
 
-## Toward LoRa
+## LoRa
 
-Everything above `Link` is radio-agnostic: frames are sized from `link.mtu`
-(tests run at a 100-byte MTU), and receivers identify senders by the id in the
-header, not by link address. A LoRa link needs `send` (broadcast-only is fine),
-`poll`, `set_radio` and a much slower `Config` (longer `rto`, `idle_timeout`,
-`hello_interval`, smaller `window_frames`).
+Flash `firmware/lora_bridge` to a Heltec WiFi LoRa 32 V3 and add `--link lora`
+to any example (or `--mesh-link lora` to the app). The protocol is unchanged
+except for delayed ACKs and slower timings (`Config.lora()`). See
+[docs/lora.md](docs/lora.md).

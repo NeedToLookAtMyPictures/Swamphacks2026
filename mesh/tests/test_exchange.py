@@ -20,7 +20,7 @@ from trailmesh.session import Session  # noqa: E402
 from trailmesh.sim import SimClock, SimMedium, run  # noqa: E402
 from trailmesh.wire import DATA_HDR, MAX_FRAME, Frame, T  # noqa: E402
 
-FAST = dict(always_on=True, cooldown=5.0)
+FAST = dict(always_on=True, cooldown=5.0, select_delay=0.05)
 DAY = 86_400
 
 
