@@ -77,7 +77,11 @@ Every record this device creates gets `origin_id = device_id` and the next
 
 When a message addressed to you arrives (through `POST /api/sync` / `merge()`),
 it is marked delivered automatically: your device creates a `delivered`
-tombstone, which spreads and kills the message on every other device.
+tombstone, which spreads and kills the message on every other device. When
+that tombstone reaches the sender within 31 days of the message being sent, the
+sender's copy is marked `received` (a local column, never shared); a message
+that died any other way shows as "received or died", since the sender can't
+tell which.
 
 People are identified by their **name**, which is unique between people and
 can't be changed (1-32 letters, digits, `_` or `-`, compared ignoring case).

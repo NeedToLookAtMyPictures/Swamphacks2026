@@ -37,7 +37,7 @@ function renderMessage(m) {
   const broadcast = m.receiver === BROADCAST;
   const card = msgEl("div", undefined, `message ${outgoing ? "outgoing" : "incoming"}`);
   // Messages to me are marked dead as soon as they arrive (delivered), so only
-  // grey out my own messages once they've been delivered or expired
+  // grey out my own messages once they've been received or expired
   if (m.is_dead && outgoing) card.classList.add("dead");
 
   const head = msgEl("div", undefined, "message-head");
@@ -47,7 +47,9 @@ function renderMessage(m) {
   card.appendChild(msgEl("div", m.content, "message-body"));
 
   if (m.is_dead && outgoing) {
-    card.appendChild(msgEl("div", broadcast ? "expired" : "delivered or expired", "message-note"));
+    // received: the delivered tombstone reached this device within 31 days
+    const note = broadcast ? "expired" : m.received ? "received" : "received or died";
+    card.appendChild(msgEl("div", note, "message-note"));
   }
   return card;
 }

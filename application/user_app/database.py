@@ -22,7 +22,7 @@ DEFAULT_DB_PATH = Path(__file__).resolve().parent / "data" / "user.db"
 
 MESSAGE_TTL = 2_678_400    # 31 days, in seconds
 TOMBSTONE_TTL = 2_678_400  # 31 days, in seconds
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # Names are people's addresses: short (they go over LoRa) and compared ignoring case
 NAME_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS messages (
     content       TEXT    NOT NULL,
     is_dead       INTEGER NOT NULL DEFAULT 0,  -- set by age or by a tombstone
     time_received REAL    NOT NULL,
+    received      INTEGER NOT NULL DEFAULT 0,  -- local only: delivered tombstone came within 31 days
     PRIMARY KEY (origin_id, seq)
 );
 
@@ -135,7 +136,9 @@ class Database:
         with self._connect() as conn:
             version = conn.execute("PRAGMA user_version").fetchone()[0]
             has_tables = conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table'").fetchone()
-            if has_tables and version != SCHEMA_VERSION:
+            if has_tables and version == 2:
+                conn.execute("ALTER TABLE messages ADD COLUMN received INTEGER NOT NULL DEFAULT 0")
+            elif has_tables and version != SCHEMA_VERSION:
                 raise RuntimeError(f"{self.path} uses an old schema; delete it and restart")
             conn.executescript(SCHEMA)
             conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
@@ -327,6 +330,7 @@ class Database:
         for rows in data.values():
             for row in rows:
                 row.pop("time_received", None)  # local bookkeeping only
+                row.pop("received", None)
         return data
 
     # -- merging records from other devices ----------------------------------------
@@ -400,8 +404,12 @@ class Database:
         return self._insert(conn, "messages", record)
 
     def _apply_tombstone(self, conn, tombstone):
-        conn.execute("UPDATE messages SET is_dead = 1 WHERE origin_id = ? AND seq = ?",
-                     (tombstone["target_origin_id"], tombstone["target_seq"]))
+        # A delivered tombstone arriving before the message expires proves it was
+        # received; after that, the sender can only tell it was received or died
+        conn.execute("UPDATE messages SET is_dead = 1, received = received OR "
+                     "(? = 'delivered' AND time_created >= ?) WHERE origin_id = ? AND seq = ?",
+                     (tombstone["reason"], time.time() - MESSAGE_TTL,
+                      tombstone["target_origin_id"], tombstone["target_seq"]))
 
     def _upsert_geolocation(self, conn, record):
         """Keep only the newest position per user; ties go to the higher device ID."""

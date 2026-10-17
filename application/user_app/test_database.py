@@ -9,7 +9,7 @@ from pathlib import Path
 from flask import Flask
 
 from api import api
-from database import MESSAGE_TTL, Database, DeviceNotInitialized
+from database import MESSAGE_TTL, SCHEMA, Database, DeviceNotInitialized
 from global_database import GlobalDatabase
 
 
@@ -68,6 +68,47 @@ class DatabaseTest(unittest.TestCase):
 
         self.carol.merge(self.bob.export())
         self.assertTrue(self.carol.get("messages", "d-alice", 1)["is_dead"])
+
+    def test_sender_sees_received_only_from_tombstone_within_31_days(self):
+        msg = self.alice.add_message("bob", "hi")
+        self.bob.merge(self.alice.export())
+        self.alice.merge(self.bob.export())     # tombstone reaches alice in time
+        message = self.alice.get("messages", "d-alice", msg["seq"])
+        self.assertTrue(message["is_dead"])
+        self.assertTrue(message["received"])
+        self.assertNotIn("received", self.alice.export()["messages"][0])  # local only
+
+        # the tombstone reaches alice after the message is 31 days old: received or died
+        late = self.alice.add_message("bob", "late")
+        self.bob.merge(self.alice.export())
+        with self.alice._connect() as conn:
+            conn.execute("UPDATE messages SET time_created = ? WHERE seq = ?",
+                         (time.time() - MESSAGE_TTL - 10, late["seq"]))
+        self.alice.merge(self.bob.export())
+        message = self.alice.get("messages", "d-alice", late["seq"])
+        self.assertTrue(message["is_dead"])
+        self.assertFalse(message["received"])
+
+    def test_expired_message_is_not_received(self):
+        msg = self.alice.add_message("bob", "hi")
+        with self.alice._connect() as conn:
+            conn.execute("UPDATE messages SET time_created = ?", (time.time() - MESSAGE_TTL - 10,))
+        self.alice.purge()
+        message = self.alice.get("messages", "d-alice", msg["seq"])
+        self.assertTrue(message["is_dead"])
+        self.assertFalse(message["received"])
+
+    def test_schema_2_gains_received_column(self):
+        path = Path(self.tmp.name) / "v2.db"
+        with sqlite3.connect(path) as conn:
+            conn.executescript(SCHEMA.replace(
+                "    received      INTEGER NOT NULL DEFAULT 0,  -- local only: delivered tombstone came within 31 days\n", ""))
+            conn.execute("PRAGMA user_version = 2")
+        conn.close()
+        db = Database(path)
+        db.init_device("erin")
+        db.add_message("bob", "hi")
+        self.assertEqual(db.list("messages")[0]["received"], 0)
 
     def test_dead_message_is_not_picked_up(self):
         msg = self.alice.add_message("bob", "hi")
