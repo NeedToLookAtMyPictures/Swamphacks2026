@@ -1,10 +1,12 @@
-"""Android transport: the ESP32-S3's native USB, driven through Termux:API.
+"""Android transport: the ESP32's USB, driven through Termux:API.
 
 Android apps can't open serial ports (there is no /dev/ttyACM0 without root).
 What Termux offers instead is `termux-usb`: after the user allows it, it starts
 a program and hands it an open file descriptor for the USB device. This module
-wraps that descriptor with libusb and speaks USB CDC-ACM itself, the same USB
-class the board presents to laptops, so the firmware doesn't change.
+wraps that descriptor with libusb and speaks the board's USB protocol itself,
+so the firmware doesn't change: USB CDC-ACM for an ESP32-S3 on its native USB,
+or the vendor protocol of the USB-serial bridge chip (CP210x, CH340) on boards
+like the classic ESP32 DevKit, the ones that show up as /dev/ttyUSB0 on Linux.
 
 Getting the descriptor is automatic: if this program wasn't started by
 termux-usb, open() reruns it through `termux-usb -r -E -e <this command>`
@@ -43,13 +45,28 @@ ERROR_TIMEOUT = -7
 ERROR_INTERRUPTED = -10
 
 # USB / CDC-ACM constants
-DESC_CONFIGURATION, DESC_INTERFACE, DESC_ENDPOINT = 2, 4, 5
+DESC_DEVICE, DESC_CONFIGURATION, DESC_INTERFACE, DESC_ENDPOINT = 1, 2, 4, 5
 CLASS_CDC_COMM, CLASS_CDC_DATA = 0x02, 0x0A
 EP_DIR_IN, EP_TYPE_MASK, EP_TYPE_BULK = 0x80, 0x03, 0x02
 REQ_GET_DESCRIPTOR, REQ_SET_LINE_CODING, REQ_SET_CONTROL_LINE_STATE = 0x06, 0x20, 0x22
 DEVICE_TO_HOST_STANDARD, HOST_TO_DEVICE_CLASS_INTERFACE = 0x80, 0x21
+HOST_TO_DEVICE_VENDOR, DEVICE_TO_HOST_VENDOR, HOST_TO_DEVICE_VENDOR_INTERFACE = 0x40, 0xC0, 0x41
 LINE_DTR = 0x0001  # DTR on, RTS off. Arduino-ESP32's TinyUSB serial only sends to the host
 #                    while DTR is on, and the toggle sequences that reboot the board all use RTS.
+
+# USB-serial bridge chips, by vendor id. Their requests follow the Linux drivers
+# (cp210x.c, ch341.c). DTR and RTS are left off: on ESP32 DevKits they drive the
+# auto-reset circuit, and off/off (like on/on) lets the chip run.
+CP210X, CH34X = "CP210x", "CH340"
+BRIDGES = {0x10C4: CP210X, 0x1A86: CH34X}
+FTDI_VID = 0x0403
+CP210X_IFC_ENABLE, CP210X_SET_LINE_CTL, CP210X_SET_MHS, CP210X_SET_BAUDRATE = 0x00, 0x03, 0x07, 0x1E
+CP210X_UART_ENABLE, CP210X_8N1, CP210X_DTR_RTS_OFF = 0x0001, 0x0800, 0x0300  # 0x0300: change both, to off
+CH34X_READ_VERSION, CH34X_WRITE_REG, CH34X_SERIAL_INIT, CH34X_MODEM_CTRL = 0x5F, 0x9A, 0xA1, 0xA4
+CH34X_REG_DIVISOR_PRESCALER, CH34X_REG_LCR2_LCR = 0x1312, 0x2518
+CH34X_LCR_8N1 = 0xC3  # rx and tx on, 8 data bits
+CH34X_DTR_RTS_OFF = 0xFFFF  # the register is active-low
+CH34X_CLOCK = 48_000_000
 
 READ_TIMEOUT_MS = 50  # matches the 50 ms pyserial read timeout the link expects
 WRITE_TIMEOUT_MS = 2000
@@ -179,11 +196,59 @@ def find_cdc(config: bytes) -> tuple[int | None, int, int, int]:
     for data, found in eps.items():
         if "in" in found and "out" in found:
             return comm, data, found["in"], found["out"]
-    raise TransportError("the USB device has no CDC serial interface: is it an ESP32-S3 running the bridge firmware?")
+    raise TransportError(
+        "the USB device has no CDC serial interface and isn't a CP210x or CH340 USB-serial chip: "
+        "is it an ESP32 running the bridge firmware?"
+    )
+
+
+def find_bulk(config: bytes) -> tuple[int, int, int]:
+    """(interface, bulk IN endpoint, bulk OUT endpoint) of the first interface with
+    a bulk pair, from a raw configuration descriptor. That's the UART of a bridge chip."""
+    eps: dict[int, dict[str, int]] = {}
+    current = None
+    i = 0
+    while i + 2 <= len(config):
+        length, kind = config[i], config[i + 1]
+        if length < 2:
+            break
+        body = config[i : i + length]
+        if kind == DESC_INTERFACE and length >= 9:
+            current = body[2]
+        elif kind == DESC_ENDPOINT and length >= 7 and current is not None and body[3] & EP_TYPE_MASK == EP_TYPE_BULK:
+            found = eps.setdefault(current, {})
+            found["in" if body[2] & EP_DIR_IN else "out"] = body[2]
+            if "in" in found and "out" in found:
+                return current, found["in"], found["out"]
+        i += length
+    raise TransportError("the USB-serial chip has no bulk endpoints")
+
+
+def ch34x_divisor(baud: int) -> int:
+    """The CH340's prescaler/divisor register value for a baud rate (ch341_get_divisor in Linux)."""
+
+    def clk_div(ps: int, fact: int) -> int:
+        return 1 << (12 - 3 * ps - fact)
+
+    baud = max(-(-CH34X_CLOCK // (clk_div(0, 0) * 256)), min(baud, CH34X_CLOCK // (clk_div(3, 0) * 2)))
+    # the highest base clock (fact = 1) that gives a divisor under 512
+    ps = next(ps for ps in (3, 2, 1, 0) if baud > CH34X_CLOCK // (clk_div(ps, 1) * 512))
+    fact, cd = 1, clk_div(ps, 1)
+    div = CH34X_CLOCK // (cd * baud)
+    if div < 9 or div > 255:
+        div, cd, fact = div // 2, cd * 2, 0
+    if div < 2:
+        raise TransportError(f"the CH340 can't do {baud} baud")
+    # the next divisor if it lands closer to the requested rate
+    if 16 * CH34X_CLOCK // (cd * div) - 16 * baud >= 16 * baud - 16 * CH34X_CLOCK // (cd * (div + 1)):
+        div += 1
+    if fact == 1 and div % 2 == 0:  # same rate from the lower base clock, which tolerates errors better
+        div, fact = div // 2, 0
+    return (0x100 - div) << 8 | fact << 2 | ps
 
 
 class TermuxUsbTransport(Transport):
-    """USB CDC-ACM over a file descriptor from termux-usb."""
+    """USB CDC-ACM, or a CP210x / CH340 bridge, over a file descriptor from termux-usb."""
 
     reconnectable = False
 
@@ -212,7 +277,15 @@ class TermuxUsbTransport(Transport):
             self._check(
                 lib.libusb_wrap_sys_device(self._ctx, self._fd, ctypes.byref(self._handle)), "libusb_wrap_sys_device"
             )
-            comm, data, self._ep_in, self._ep_out = find_cdc(self._config_descriptor())
+            vid = self._vendor_id()
+            if vid == FTDI_VID:
+                raise TransportError("FTDI USB-serial chips aren't supported on Android, only CP210x and CH340")
+            bridge = BRIDGES.get(vid)
+            if bridge:
+                comm = None
+                data, self._ep_in, self._ep_out = find_bulk(self._config_descriptor())
+            else:
+                comm, data, self._ep_in, self._ep_out = find_cdc(self._config_descriptor())
             for iface in (comm, data):
                 if iface is None:
                     continue
@@ -221,7 +294,11 @@ class TermuxUsbTransport(Transport):
                 self._claimed.append(iface)
             for ep in (self._ep_in, self._ep_out):
                 lib.libusb_clear_halt(self._handle, ep)  # reset data toggles left by a previous run
-            if comm is not None:
+            if bridge == CP210X:
+                self._setup_cp210x(data, baud)
+            elif bridge == CH34X:
+                self._setup_ch34x(baud)
+            elif comm is not None:
                 if baud == 1200:
                     raise TransportError("1200 baud reboots Arduino-ESP32 boards into the bootloader")
                 coding = ctypes.create_string_buffer(struct.pack("<IBBB", baud, 0, 0, 8), 7)  # 8N1
@@ -244,6 +321,58 @@ class TermuxUsbTransport(Transport):
         if rc < 0:
             raise TransportError(f"{what} failed: {self._lib.libusb_error_name(rc).decode()}")
         return rc
+
+    def _control(self, request_type: int, request: int, value: int, index: int, data: bytes, what: str) -> None:
+        buf = ctypes.create_string_buffer(data, len(data)) if data else None
+        self._check(
+            self._lib.libusb_control_transfer(
+                self._handle, request_type, request, value, index, buf, len(data), CTRL_TIMEOUT_MS
+            ),
+            what,
+        )
+
+    def _setup_cp210x(self, iface: int, baud: int) -> None:
+        def out(request: int, value: int, data: bytes = b"") -> None:
+            self._control(HOST_TO_DEVICE_VENDOR_INTERFACE, request, value, iface, data, f"CP210x request {request:#x}")
+
+        out(CP210X_IFC_ENABLE, CP210X_UART_ENABLE)
+        out(CP210X_SET_BAUDRATE, 0, struct.pack("<I", baud))
+        out(CP210X_SET_LINE_CTL, CP210X_8N1)
+        out(CP210X_SET_MHS, CP210X_DTR_RTS_OFF)
+
+    def _setup_ch34x(self, baud: int) -> None:
+        def out(request: int, value: int, index: int = 0) -> None:
+            self._control(HOST_TO_DEVICE_VENDOR, request, value, index, b"", f"CH340 request {request:#x}")
+
+        buf = ctypes.create_string_buffer(2)
+        self._check(
+            self._lib.libusb_control_transfer(
+                self._handle, DEVICE_TO_HOST_VENDOR, CH34X_READ_VERSION, 0, 0, buf, 2, CTRL_TIMEOUT_MS
+            ),
+            "CH340 read version",
+        )
+        version = buf.raw[0]
+        out(CH34X_SERIAL_INIT, 0)
+        divisor = ch34x_divisor(baud)
+        if version > 0x27:
+            divisor |= 0x80  # send each byte on, instead of waiting for a full 32-byte packet
+        out(CH34X_WRITE_REG, CH34X_REG_DIVISOR_PRESCALER, divisor)
+        if version >= 0x30:  # older chips keep the line settings elsewhere, defaulting to 8N1
+            out(CH34X_WRITE_REG, CH34X_REG_LCR2_LCR, CH34X_LCR_8N1)
+        out(CH34X_MODEM_CTRL, CH34X_DTR_RTS_OFF)
+
+    def _vendor_id(self) -> int:
+        buf = ctypes.create_string_buffer(18)
+        got = self._check(
+            self._lib.libusb_control_transfer(
+                self._handle, DEVICE_TO_HOST_STANDARD, REQ_GET_DESCRIPTOR, DESC_DEVICE << 8, 0, buf, 18,
+                CTRL_TIMEOUT_MS,
+            ),
+            "read device descriptor",
+        )
+        if got < 10:
+            raise TransportError("short device descriptor")
+        return int.from_bytes(buf.raw[8:10], "little")
 
     def _config_descriptor(self) -> bytes:
         def get(n: int) -> bytes:

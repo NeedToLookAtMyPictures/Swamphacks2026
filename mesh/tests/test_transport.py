@@ -151,6 +151,23 @@ class Selection(unittest.TestCase):
             self.assertEqual(transport.open_transport("socket://127.0.0.1:5000", 460800), ("pyserial", "socket://127.0.0.1:5000"))
             self.assertEqual(transport.open_transport("auto", 460800), ("pyserial", "auto"))
 
+    def find_board(self, *ports):
+        found = [mock.Mock(device=dev, vid=vid) for dev, vid in ports]
+        with mock.patch("serial.tools.list_ports.comports", return_value=found):
+            return transport.PySerialTransport._find_board(None)
+
+    def test_auto_finds_board(self):
+        self.assertEqual(self.find_board(("/dev/ttyACM0", 0x303A)), "/dev/ttyACM0")
+        # a DevKit behind a CP210x / CH340 bridge (/dev/ttyUSB0 on Linux)
+        self.assertEqual(self.find_board(("/dev/ttyUSB0", 0x10C4)), "/dev/ttyUSB0")
+        self.assertEqual(self.find_board(("/dev/ttyUSB0", 0x1A86)), "/dev/ttyUSB0")
+        # a native-USB board wins over an unrelated bridge chip
+        self.assertEqual(self.find_board(("/dev/ttyUSB0", 0x0403), ("/dev/ttyACM0", 0x303A)), "/dev/ttyACM0")
+        with self.assertRaises(transport.TransportError):
+            self.find_board(("/dev/ttyS0", None))
+        with self.assertRaises(transport.TransportError):
+            self.find_board(("/dev/ttyUSB0", 0x10C4), ("/dev/ttyUSB1", 0x1A86))
+
 
 def interface(num, cls, n_eps):
     return bytes([9, 4, num, 0, n_eps, cls, 0, 0, 0])
@@ -183,6 +200,26 @@ class CdcDescriptor(unittest.TestCase):
     def test_not_cdc(self):
         with self.assertRaises(TransportError):
             termux_usb.find_cdc(config(interface(0, 0xFF, 2), endpoint(0x01, 2), endpoint(0x81, 2)))
+
+
+class BridgeChips(unittest.TestCase):
+    def test_cp2102_bulk_pair(self):  # CP2102: one vendor interface, bulk in/out
+        cfg = config(interface(0, 0xFF, 2), endpoint(0x81, 2), endpoint(0x01, 2))
+        self.assertEqual(termux_usb.find_bulk(cfg), (0, 0x81, 0x01))
+
+    def test_ch340_skips_interrupt_endpoint(self):  # CH340: bulk out, bulk in, interrupt in
+        cfg = config(interface(0, 0xFF, 3), endpoint(0x02, 2), endpoint(0x82, 2), endpoint(0x81, 3))
+        self.assertEqual(termux_usb.find_bulk(cfg), (0, 0x82, 0x02))
+
+    def test_no_bulk(self):
+        with self.assertRaises(TransportError):
+            termux_usb.find_bulk(config(interface(0, 0xFF, 1), endpoint(0x81, 3)))
+
+    def test_ch340_divisors(self):  # values the Linux ch341 driver computes
+        self.assertEqual(termux_usb.ch34x_divisor(9600), 0xB202)
+        self.assertEqual(termux_usb.ch34x_divisor(115200), 0xCC03)
+        self.assertEqual(termux_usb.ch34x_divisor(460800), 0xF303)
+        self.assertEqual(termux_usb.ch34x_divisor(921600), 0xF307)
 
 
 class TermuxRerun(unittest.TestCase):
