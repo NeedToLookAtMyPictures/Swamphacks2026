@@ -1,6 +1,7 @@
 """Run with: python -m unittest test_trail_distance"""
 
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -93,6 +94,15 @@ class TrailNetworkTest(unittest.TestCase):
         spur = [(29.61, -82.39), (29.61, -82.3990)]  # ends about 100 m from the west side
         trails = TrailNetwork([[N1, N2], spur])
         [route] = trails.distances(N1, [spur[0]])
+        self.assertIsNone(route["distance"])
+
+    def test_trails_a_continent_apart_build_quickly(self):
+        # Florida and the Sierra Nevada: joining their ends must not search every cell in between
+        sierra = [(36.58, -118.29), (36.59, -118.29)]
+        start = time.monotonic()
+        trails = TrailNetwork(U + [sierra])
+        self.assertLess(time.monotonic() - start, 2)
+        [route] = trails.distances(N1, [sierra[0]])
         self.assertIsNone(route["distance"])
 
 

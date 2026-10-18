@@ -1,2 +1,5 @@
 # Server database
 data/
+
+# Maps from download_map.py, before they're copied into map/
+downloads/

@@ -8,13 +8,6 @@ let globalTrails = [];      // rows from /api/global/trails: {id, name, descript
 let trailsLayer = null;
 let selectedTrailId = loadSelectedTrail();
 
-// Trails we plan to add whose GPX isn't on the server yet; shown in Explore as
-// "coming soon" until a global trail matching them arrives
-const UPCOMING_TRAILS = [
-  { match: /pct|pacific crest/i, name: "Pacific Crest Trail (section)",
-    description: "GPX coming soon" },
-];
-
 function loadSelectedTrail() {
   try {
     return localStorage.getItem(SELECTED_TRAIL_KEY);
@@ -67,16 +60,14 @@ function selectTrail(id) {
   if (trail) map.fitBounds(L.latLngBounds(trail.segments.flat()), { padding: [30, 30] });
 }
 
-function exploreCard(name, detail, { selected = false, disabled = false, onClick } = {}) {
+function exploreCard(name, detail, selected, onClick) {
   const card = settingsEl("button", undefined, "explore-card");
   card.type = "button";
-  card.disabled = disabled;
   card.classList.toggle("selected", selected);
   card.appendChild(settingsEl("span", name, "explore-card-name"));
   if (detail) card.appendChild(settingsEl("span", detail, "explore-card-detail"));
-  card.appendChild(settingsEl("span", disabled ? "Coming soon" : selected ? "On the map" : "Show on map",
-                              "explore-card-action"));
-  if (onClick) card.addEventListener("click", onClick);
+  card.appendChild(settingsEl("span", selected ? "On the map" : "Show on map", "explore-card-action"));
+  card.addEventListener("click", onClick);
   return card;
 }
 
@@ -84,10 +75,7 @@ function renderExplore() {
   const list = document.getElementById("explore-list");
   const cards = globalTrails.map((t) => exploreCard(t.name,
     [formatTrailLength(t.length_km), t.description].filter(Boolean).join(" · "),
-    { selected: t.id === selectedTrailId, onClick: () => selectTrail(t.id) }));
-  UPCOMING_TRAILS
-    .filter((u) => !globalTrails.some((t) => u.match.test(`${t.id} ${t.name}`)))
-    .forEach((u) => cards.push(exploreCard(u.name, u.description, { disabled: true })));
+    t.id === selectedTrailId, () => selectTrail(t.id)));
   if (!cards.length) cards.push(settingsEl("p", "No trails yet. They arrive from the server on the next sync.",
                                            "settings-empty"));
   list.replaceChildren(...cards);

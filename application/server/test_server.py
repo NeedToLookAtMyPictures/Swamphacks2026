@@ -110,7 +110,7 @@ class ServerSyncTest(unittest.TestCase):
     def test_server_starts_with_the_sample_global_data(self):
         data = self.client.get("/api/global").json
         self.assertEqual(len(data["locales"]), 10)
-        self.assertEqual([t["id"] for t in data["trails"]], ["trail-gainesville-hawthorne"])
+        self.assertEqual([t["id"] for t in data["trails"]], ["trail-gainesville-hawthorne", "trail-john-muir"])
         self.assertTrue(data["trails"][0]["gpx"].lstrip().startswith("<?xml"))
         self.assertEqual(len(self.client.get("/api/global_locales").json), 10)
         trail = self.client.get("/api/global_trails").json[0]
@@ -121,7 +121,7 @@ class ServerSyncTest(unittest.TestCase):
         globe = GlobalDatabase(Path(self.tmp.name) / "alice-global.db")
         server_sync.sync_once(self.alice, "x", globe)
         self.assertEqual(len(globe.locales()), 10)
-        self.assertEqual(len(globe.trails()), 1)
+        self.assertEqual(len(globe.trails()), 2)
         version = globe.info()["version"]
         self.assertEqual(version, self.client.get("/api/global").json["version"])
         # Up to date: the server doesn't send it again

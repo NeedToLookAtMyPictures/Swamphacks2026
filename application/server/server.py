@@ -12,6 +12,7 @@ Usage:
     python server.py                     # development, http://127.0.0.1:8000
     python server.py --host 0.0.0.0      # development, reachable (and discoverable) on the wifi
     python server.py --load-global FILE  # replace the global data (devices get it on next sync)
+    python download_map.py --gpx TRAIL.gpx   # download map tiles around a trail, for map/
 
 Open the server's address in a browser to see everything in its database.
 

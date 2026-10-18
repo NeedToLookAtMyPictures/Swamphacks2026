@@ -1,5 +1,5 @@
 {
-  "_comment": "Example global data in the format the server sends. Places are real Gainesville parks, but the amenities, descriptions and trail routes are made up / approximate for testing. Trails here use gpx_file (relative to this file); the server sends the GPX text as gpx. Hawthorne-trail locales are fictional and snapped onto the track in sample_trails/Gainesville-Hawthorne_State_Trail.gpx. Load with: python global_database.py load sample_global_locales.json",
+  "_comment": "Example global data in the format the server sends. Places are real Gainesville parks, but the amenities, descriptions and trail routes are made up / approximate for testing. Trails here use gpx_file (relative to this file); the server sends the GPX text as gpx. The John Muir Trail (sample_trails/John_Muir_Trail.gpx) is from OpenStreetMap via waymarkedtrails.org. Hawthorne-trail locales are fictional and snapped onto the track in sample_trails/Gainesville-Hawthorne_State_Trail.gpx. Load with: python global_database.py load sample_global_locales.json",
   "locales": [
     {
       "id": "water-depot-park-fountain",
@@ -88,6 +88,12 @@
       "name": "Gainesville-Hawthorne Trail",
       "description": "Paved rail trail from Depot Park east past Boulware Springs",
       "gpx_file": "sample_trails/Gainesville-Hawthorne_State_Trail.gpx"
+    },
+    {
+      "id": "trail-john-muir",
+      "name": "John Muir Trail",
+      "description": "Yosemite Valley to Mount Whitney through the Sierra Nevada; most of it is also the Pacific Crest Trail",
+      "gpx_file": "sample_trails/John_Muir_Trail.gpx"
     }
   ]
 }

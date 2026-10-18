@@ -99,13 +99,11 @@ main {
   cursor: pointer;
 }
 
-.explore-card:hover:not(:disabled) { background: #e8efe9; }
+.explore-card:hover { background: #e8efe9; }
 .explore-card.selected { border-color: #2e5a43; border-left-color: #ff6f00; background: #f0f6f2; }
-.explore-card:disabled { border-left-color: #bbb; color: #888; cursor: default; }
 .explore-card-name { font-size: 17px; font-weight: 600; }
 .explore-card-detail { font-size: 14px; color: #666; }
 .explore-card-action { margin-top: 6px; font-size: 13px; font-weight: 600; color: #2e5a43; }
-.explore-card:disabled .explore-card-action { color: #999; }
 
 /* Debug tab */
 #debug {

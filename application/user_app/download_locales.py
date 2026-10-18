@@ -141,26 +141,23 @@ def http_range_source(url):
     return get_bytes
 
 
-def download_map(args):
-    """Download the offline basemap into data/map.pmtiles."""
-    bbox, name = resolve_area(args)
-
-    source = args.source or latest_protomaps_build()
+def open_source(source):
+    """A pmtiles Reader for a Protomaps build: a URL (None: the latest daily build) or a local file."""
+    source = source or latest_protomaps_build()
     if Path(source).exists():
-        source_file = open(source, "rb")
-        reader = Reader(MmapSource(source_file))
-    else:
-        reader = Reader(http_range_source(source))
+        return Reader(MmapSource(open(source, "rb"))), source
+    return Reader(http_range_source(source)), source
 
-    src_header = reader.header()
-    max_zoom = min(args.max_zoom, src_header["max_zoom"])
-    tiles = sorted(tiles_in_bbox(bbox, args.min_zoom, max_zoom), key=lambda t: zxy_to_tileid(*t))
-    print(f"Extracting {name} (zoom {args.min_zoom}-{max_zoom}, bbox {bbox})")
+
+def extract_map(reader, source, tiles, bbox, name, min_zoom, max_zoom, map_file, info_file):
+    """Copy `tiles` [(z, x, y)] from reader into map_file, and write its info_file (map.json)."""
+    tiles = sorted(tiles, key=lambda t: zxy_to_tileid(*t))
+    print(f"Extracting {name} (zoom {min_zoom}-{max_zoom}, bbox {bbox})")
     print(f"  source: {source}")
     print(f"  {len(tiles)} tiles to fetch")
 
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    tmp_file = MAP_FILE.with_suffix(".pmtiles.part")
+    map_file.parent.mkdir(parents=True, exist_ok=True)
+    tmp_file = map_file.with_suffix(".pmtiles.part")
     written = total_bytes = 0
     with open(tmp_file, "wb") as f:
         writer = Writer(f)
@@ -178,6 +175,7 @@ def download_map(args):
             tmp_file.unlink()
             raise SystemExit("No tiles found in that area.")
 
+        src_header = reader.header()
         min_lon, min_lat, max_lon, max_lat = bbox
         header = {
             "tile_type": src_header["tile_type"],
@@ -186,23 +184,32 @@ def download_map(args):
             "min_lat_e7": int(min_lat * 1e7),
             "max_lon_e7": int(max_lon * 1e7),
             "max_lat_e7": int(max_lat * 1e7),
-            "center_zoom": min(args.min_zoom + 3, max_zoom),
+            "center_zoom": min(min_zoom + 3, max_zoom),
             "center_lon_e7": int((min_lon + max_lon) / 2 * 1e7),
             "center_lat_e7": int((min_lat + max_lat) / 2 * 1e7),
         }
         writer.finalize(header, reader.metadata())
 
-    tmp_file.replace(MAP_FILE)
-    MAP_INFO_FILE.write_text(json.dumps({
+    tmp_file.replace(map_file)
+    info_file.write_text(json.dumps({
         "name": name,
         "source": source,
-        "bbox": bbox,
+        "bbox": list(bbox),
         "center": [(min_lat + max_lat) / 2, (min_lon + max_lon) / 2],
-        "min_zoom": args.min_zoom,
+        "min_zoom": min_zoom,
         "max_zoom": max_zoom,
     }, indent=2))
-    print(f"Saved {MAP_FILE.relative_to(BASE_DIR)} ({MAP_FILE.stat().st_size / 1e6:.1f} MB). "
-          "Start the app with `python main.py`.")
+    print(f"Saved {map_file} ({map_file.stat().st_size / 1e6:.1f} MB) and {info_file.name}")
+
+
+def download_map(args):
+    """Download the offline basemap into data/map.pmtiles."""
+    bbox, name = resolve_area(args)
+    reader, source = open_source(args.source)
+    max_zoom = min(args.max_zoom, reader.header()["max_zoom"])
+    extract_map(reader, source, tiles_in_bbox(bbox, args.min_zoom, max_zoom), bbox, name,
+                args.min_zoom, max_zoom, MAP_FILE, MAP_INFO_FILE)
+    print("Start the app with `python main.py`.")
 
 
 # ---------------------------------------------------------------------------
