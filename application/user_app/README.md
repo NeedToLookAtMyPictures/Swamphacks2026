@@ -20,10 +20,11 @@ python download_locales.py map    # Gainesville to Hawthorne, FL, zoom 8-15
 
 `download_locales.py map` finds the latest daily Protomaps world build, uses HTTP range
 requests to pull only the tiles inside the area, and saves them as one file,
-`data/map.pmtiles` (git-ignored). Running it again replaces the old map.
+`data/maps/<name>.pmtiles` (git-ignored; see `maps.py`). Running it again for
+the same place replaces that map.
 
-You can skip this when the app can reach a server: it downloads the server's map
-(`application/server/map/`) during sync, and replaces a map made here with it.
+You can skip this when the app can reach a server: it downloads the server's maps
+(`application/server/map/`) into `data/maps/` during sync, next to any made here.
 
 Other areas and sources:
 
@@ -195,13 +196,16 @@ their `location`.
 The data has the form `{locales: [...], trails: [{id, name, description?, gpx}]}`,
 and loading it replaces everything. GPX tracks (`trkseg`/`trkpt`) and routes
 (`rte`/`rtept`) are read; a trail whose GPX has no line of at least 2 points is
-refused. The server starts with `sample_global_locales.json` (10 water sources
-and campsites, real Gainesville-area places with made-up amenities, plus the
-Gainesville-Hawthorne trail from `sample_trails/`; in a file a trail can give
-`gpx_file` instead of the GPX text). To test without a server, load it directly:
+refused. The server starts with `../server/global/global_data.json` (10 water
+sources and campsites, real Gainesville-area places with made-up amenities; 10
+pins at real places along the John Muir Trail's Yosemite Valley section, with
+approximate amenities; the Gainesville-Hawthorne Trail and that JMT section,
+whose GPX files are in
+`../server/global/trails/`; in a file a trail can give `gpx_file` instead of the
+GPX text). To test without a server, load it directly:
 
 ```bash
-python global_database.py load sample_global_locales.json
+python global_database.py load ../server/global/global_data.json
 ```
 
 | Method | Path | What it does |
@@ -249,7 +253,7 @@ tab's `gps` section, which also has a **Run GPS check** button.
 - **Messages**: a sidebar with one conversation per person you've messaged with, with Everyone pinned to the top; click one to see its history and send to that person. The New chat dropdown lists everyone in your GPS data (newest first), or Other to type any name
 - **Map**: offline Leaflet map. The gear button opens Settings:
   - **Last known location**: search people and check who to pin, with their name and when they were last seen
-  - **Trails**: select a global trail (with search) to draw it on the map and zoom to it; only the selected trail is shown
   - **Locales**: the global locales (shown by default), grouped by category; show or hide a whole category or single locales, with search
   - Clicking a global locale shrinks the map to the top half and opens a panel below it with information about the site (description, coordinates, distance along the trails from your last location, comment count) and its comments, newest first, with a box to add one. Comments are user `locales` records with `location` set to the site's id, so they sync like other records
+- **Explore**: a card per global trail; picking one draws it on the map, opens the Map tab zoomed to it on that trail's offline map (the one made for it, else one whose area holds it, else a blank background with a notice) and is remembered on this device. Only the selected trail is shown
 - **Debug**: shows every table in the local and global databases (refresh button; offers to create the device if it has no identity yet)

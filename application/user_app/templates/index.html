@@ -11,6 +11,7 @@
   <nav class="tabs">
     <button class="tab active" data-tab="messages">Messages</button>
     <button class="tab" data-tab="map">Map</button>
+    <button class="tab" data-tab="explore">Explore</button>
     <button class="tab" data-tab="debug">Debug <span id="mesh-badge" class="mesh-badge off" title="Mesh radio"></span></button>
   </nav>
 
@@ -42,9 +43,17 @@
       </div>
     </section>
 
+    <section id="explore" class="panel">
+      <h2 class="explore-title">Explore trails</h2>
+      <p class="explore-intro">Pick a trail to show on the map.</p>
+      <div id="explore-list"></div>
+    </section>
+
     <section id="map" class="panel">
-      <div id="no-map" class="notice"{% if map_info.name %} hidden{% endif %}>No offline map yet. It
+      <div id="no-map" class="notice"{% if maps %} hidden{% endif %}>No offline map yet. It
         downloads from the server on the next sync, or run <code>python download_locales.py map</code>.</div>
+      <div id="no-trail-map" class="notice" hidden>No offline map for this trail yet; the server
+        sends one on a sync once it has it.</div>
       <div id="leaflet-map"></div>
       <div id="locale-sheet" hidden>
         <div class="locale-sheet-top">
@@ -72,7 +81,6 @@
             <div class="settings-title">Settings</div>
             <button class="settings-item" type="button" data-open="last-known">Last known location <span>&rsaquo;</span></button>
             <button class="settings-item" type="button" data-open="locales">Locales <span>&rsaquo;</span></button>
-            <button class="settings-item" type="button" data-open="trails">Trails <span>&rsaquo;</span></button>
           </div>
           <div class="settings-view" data-view="last-known" hidden>
             <div class="settings-header">
@@ -93,14 +101,6 @@
               <button id="locales-hide-all" type="button">Hide all</button>
             </div>
             <div id="locales-list"></div>
-          </div>
-          <div class="settings-view" data-view="trails" hidden>
-            <div class="settings-header">
-              <button class="settings-back" type="button" data-open="menu" aria-label="Back">&lsaquo;</button>
-              <span class="settings-title">Trails</span>
-            </div>
-            <input id="trails-search" type="search" placeholder="Search trails" autocomplete="off">
-            <div id="trails-list"></div>
           </div>
         </div>
       </div>
@@ -139,7 +139,10 @@
     </section>
   </main>
 
-  <script>window.MAP_INFO = {{ map_info | tojson }};</script>
+  <script>
+    window.MAPS = {{ maps | tojson }};
+    window.DEFAULT_MAP = {{ default_map | tojson }};
+  </script>
   <script src="{{ url_for('static', filename='vendor/leaflet/leaflet.js') }}"></script>
   <script src="{{ url_for('static', filename='vendor/protomaps-leaflet/protomaps-leaflet.js') }}"></script>
   <script src="{{ url_for('static', filename='messages.js') }}"></script>

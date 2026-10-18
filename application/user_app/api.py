@@ -30,7 +30,7 @@ Global data (set by the company, loaded once from the server; users can't change
     GET    /api/mesh                        the mesh radio: board, nearby devices, current sync,
                                             recent activity ({enabled: false} without --mesh-port)
     GET    /api/global/info                 {loaded_at, version}
-    GET    /api/map/info                    the offline map {name, bbox, center, zooms, version}
+    GET    /api/maps                        the offline maps [{id, name, bbox, center, zooms, trail?, version?}]
     GET    /api/distances?from=&to=         walking distance along the global trails to global
                                             locales; from a locale id or "lat,lon" (default:
                                             this user's position), to a locale id (default: all)
@@ -38,7 +38,6 @@ Global data (set by the company, loaded once from the server; users can't change
                                             server sends it during sync instead)
 """
 
-import json
 import sqlite3
 import time
 
@@ -46,7 +45,8 @@ from flask import Blueprint, Response, current_app, jsonify, request
 
 import server_sync
 from database import SHARED_TABLES, DeviceNotInitialized, check_name
-from download_locales import DEFAULT_BBOX, MAP_FILE, MAP_INFO_FILE
+from download_locales import DEFAULT_BBOX, MAPS_DIR
+from maps import read_maps
 from trail_distance import TrailNetwork
 
 api = Blueprint("api", __name__, url_prefix="/api")
@@ -346,12 +346,15 @@ def global_info():
     return jsonify(global_db().info())
 
 
-def load_map_info():
-    """The offline map's name, bounds and zoom levels, or the defaults when there's no map.
+def load_maps():
+    """The offline maps' info (see maps.py), by name. version is set on maps from the
+    server; the page reloads a map when its version changes."""
+    return sorted(({"version": None, "trail": None, **info} for info in read_maps(MAPS_DIR).values()),
+                  key=lambda m: (m.get("name") or m["id"]).lower())
 
-    version is set for a map from the server; the page reloads the map when it changes."""
-    if MAP_FILE.exists() and MAP_INFO_FILE.exists():
-        return {"version": None, **json.loads(MAP_INFO_FILE.read_text())}
+
+def default_map_view():
+    """Where the map looks when there's no offline map yet."""
     min_lon, min_lat, max_lon, max_lat = DEFAULT_BBOX
     return {
         "name": None,
@@ -363,9 +366,9 @@ def load_map_info():
     }
 
 
-@api.get("/map/info")
-def map_info():
-    return jsonify(load_map_info())
+@api.get("/maps")
+def maps_info():
+    return jsonify(load_maps())
 
 
 @api.post("/global/load")

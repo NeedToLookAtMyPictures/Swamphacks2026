@@ -5,8 +5,10 @@ the ones given with --server, or else one on the same wifi (see discovery.py).
 Once it reaches one, it syncs with it every SYNC_EVERY seconds: the device sends
 the records that arrived since its last push and merges what the server got
 since its last pull. When the server's global data (water sources, campsites,
-trails) differs from the device's copy, it comes along and replaces it, and the
-same for the offline map, which is downloaded separately since it's large. If a
+trails) differs from the device's copy, it comes along and replaces it. The
+server also lists its offline maps; the device downloads the ones it lacks or
+has an old copy of separately, since they're large, and deletes the server
+maps the server no longer has. If a
 sync fails, it goes back to looking. Writing something locally (wake()) or
 receiving something new syncs again right away instead of waiting.
 
@@ -19,9 +21,9 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from pathlib import Path
 
 import discovery
+from maps import map_files, read_maps
 
 SYNC_EVERY = 5     # seconds between syncs while a server answers
 CHECK_EVERY = 30   # seconds between looking for a server while there is none
@@ -77,37 +79,50 @@ def download(server_url, path, dest, timeout=MAP_TIMEOUT):
     return digest.hexdigest()
 
 
-def map_version(map_dir):
-    """The version of the map in map_dir (None if it has none, e.g. one from
-    download_locales.py: then the server's map replaces it)."""
-    tiles, info_file = Path(map_dir) / "map.pmtiles", Path(map_dir) / "map.json"
-    if not (tiles.exists() and info_file.exists()):
-        return None
-    try:
-        return json.loads(info_file.read_text()).get("version")
-    except ValueError:
-        return None
+def map_versions(maps_dir):
+    """{id: version} of the maps in maps_dir (version None for one made on this
+    device with download_locales.py; the server's maps are never one of those)."""
+    return {map_id: info.get("version") for map_id, info in read_maps(maps_dir).items()}
 
 
-def update_map(server_url, offer, map_dir):
-    """Download the map the server offered ({version, size, info}) into map_dir.
+def update_map(server_url, map_id, offer, maps_dir):
+    """Download the map the server offered ({version, size, info}) into maps_dir.
 
     The new file only replaces the old one once it's complete and checked, so the
     app keeps serving a working map the whole time.
     """
-    map_dir = Path(map_dir)
-    map_dir.mkdir(parents=True, exist_ok=True)
-    tiles, info_file = map_dir / "map.pmtiles", map_dir / "map.json"
+    tiles, info_file = map_files(maps_dir, map_id)
+    tiles.parent.mkdir(parents=True, exist_ok=True)
     part = tiles.with_suffix(".pmtiles.part")
-    print(f"Downloading the server's map ({offer['size'] / 1e6:.1f} MB)")
+    name = offer["info"].get("name") or map_id
+    print(f"Downloading the server's map {name} ({offer['size'] / 1e6:.1f} MB)")
     try:
-        if download(server_url, "/api/map.pmtiles", part) != offer["version"]:
+        if download(server_url, f"/api/maps/{map_id}.pmtiles", part) != offer["version"]:
             raise ValueError("the downloaded map doesn't match its version")
         part.replace(tiles)
     finally:
         part.unlink(missing_ok=True)
     info_file.write_text(json.dumps(dict(offer["info"], version=offer["version"]), indent=2))
-    print(f"Got the server's map: {offer['info'].get('name')}")
+    print(f"Got the server's map {name}")
+
+
+def update_maps(server_url, offers, maps_dir):
+    """Make maps_dir hold the server's maps (offers: {id: {version, size, info}}).
+
+    Maps made on this device (no version) are left alone. One failed download
+    doesn't stop the others; it's tried again on the next sync."""
+    ours = map_versions(maps_dir)
+    for map_id, version in ours.items():
+        if version is not None and map_id not in offers:
+            for path in map_files(maps_dir, map_id):
+                path.unlink(missing_ok=True)
+            print(f"Removed the map {map_id}; the server no longer has it")
+    for map_id, offer in offers.items():
+        if ours.get(map_id) != offer["version"]:
+            try:
+                update_map(server_url, map_id, offer, maps_dir)
+            except (OSError, ValueError) as exc:
+                print(f"Map download failed: {exc}")
 
 
 def register(server_url, name, device_id=None):
@@ -115,12 +130,12 @@ def register(server_url, name, device_id=None):
     return call(server_url, "/api/register", {"name": name, "device_id": device_id})
 
 
-def sync_once(db, server_url, global_db=None, map_dir=None):
+def sync_once(db, server_url, global_db=None, maps_dir=None):
     """One full exchange with the server. Raises OSError when it can't be reached.
 
     With global_db (a GlobalDatabase), also gets the server's global data when
-    this device's copy is missing or out of date, and with map_dir (where the app
-    keeps map.pmtiles and map.json) the same for the offline map."""
+    this device's copy is missing or out of date, and with maps_dir (where the
+    app keeps its offline maps, see maps.py) the same for the server's maps."""
     device = db.get_device()
     if device is None:
         return None  # no identity yet, nothing to sync
@@ -139,8 +154,8 @@ def sync_once(db, server_url, global_db=None, map_dir=None):
     }
     if global_db is not None:
         request["global_version"] = global_db.info()["version"]
-    if map_dir is not None:
-        request["map_version"] = map_version(map_dir)
+    if maps_dir is not None:
+        request["maps"] = map_versions(maps_dir)
     result = call(server_url, "/api/sync", request)
     merged = db.merge(result["records"], via="server")
     if global_db is not None and result.get("global"):
@@ -148,13 +163,9 @@ def sync_once(db, server_url, global_db=None, map_dir=None):
         print(f"Got the server's global data: {loaded}")
     db.update_device(last_server_sync=time.time(), last_push=push_cursor,
                      server_cursor=result["cursor"], server_id=server_id)
-    if map_dir is not None and result.get("map"):
-        # Last, so the records above are saved even if the download fails;
-        # it's tried again on the next sync
-        try:
-            update_map(server_url, result["map"], map_dir)
-        except (OSError, ValueError) as exc:
-            print(f"Map download failed: {exc}")
+    if maps_dir is not None and "maps" in result:
+        # Last, so the records above are saved even if a download fails
+        update_maps(server_url, result["maps"], maps_dir)
     return merged
 
 
@@ -203,8 +214,8 @@ class ServerFinder:
 class SyncLoop:
     """One step at a time, so the background thread stays a plain loop."""
 
-    def __init__(self, db, finder, global_db=None, map_dir=None):
-        self.db, self.finder, self.global_db, self.map_dir = db, finder, global_db, map_dir
+    def __init__(self, db, finder, global_db=None, maps_dir=None):
+        self.db, self.finder, self.global_db, self.maps_dir = db, finder, global_db, maps_dir
         self.url = None  # the server we're connected to, if any
         self.said_none = False  # already printed that no server answers
 
@@ -224,7 +235,7 @@ class SyncLoop:
             self.said_none = False
             print(f"Connected to {self.url} ({self.finder.current[1]})")
         try:
-            merged = sync_once(self.db, self.url, self.global_db, self.map_dir)
+            merged = sync_once(self.db, self.url, self.global_db, self.maps_dir)
         except (OSError, ServerError, ValueError) as exc:
             print(f"Server sync failed: {exc}")
             self.url = self.finder.current = None
@@ -236,9 +247,9 @@ class SyncLoop:
         return SYNC_EVERY
 
 
-def start(db, finder, global_db=None, map_dir=None):
+def start(db, finder, global_db=None, maps_dir=None):
     """Sync with the server in a background thread for as long as the app runs."""
-    sync = SyncLoop(db, finder, global_db, map_dir)
+    sync = SyncLoop(db, finder, global_db, maps_dir)
 
     def loop():
         while True:

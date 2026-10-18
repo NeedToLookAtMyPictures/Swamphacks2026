@@ -1,15 +1,15 @@
 let map = null;
 let mapLayer = null;
+let currentMap = null;  // the map shown: one of window.MAPS, or a stand-in without tiles (id null)
 
 function initMap() {
-  const info = window.MAP_INFO;
   map = L.map("leaflet-map", { maxBoundsViscosity: 0.8 });
-  showMapData(info);
-  map.setView(info.center, Math.min(info.min_zoom + 5, info.max_zoom));
+  showTrailMap(false);
 }
 
-// Fit the map to info's area and draw its tiles; called again when a new map arrives
+// Limit the map to info's area and draw its tiles; called again when another map is shown
 function showMapData(info) {
+  currentMap = info;
   const [minLon, minLat, maxLon, maxLat] = info.bbox;
   map.setMinZoom(info.min_zoom);
   map.setMaxZoom(info.max_zoom + 3);  // past the data's max zoom the vectors are scaled up
@@ -17,13 +17,14 @@ function showMapData(info) {
 
   if (mapLayer) map.removeLayer(mapLayer);
   mapLayer = null;
-  document.getElementById("no-map").hidden = Boolean(info.name);
-  if (!info.name) return;  // no map downloaded yet
+  document.getElementById("no-map").hidden = Boolean(info.id || window.MAPS.length);
+  document.getElementById("no-trail-map").hidden = Boolean(info.id || !window.MAPS.length);
+  if (!info.id) return;  // no map for this area
 
-  // Vector map served locally by main.py from data/map.pmtiles. The version in the
-  // URL makes the layer read the new file instead of what it cached from the old one.
+  // Vector map served locally by main.py from data/maps/<id>.pmtiles. The version in
+  // the URL makes the layer read the new file instead of what it cached from the old one.
   mapLayer = protomapsL.leafletLayer({
-    url: `/map.pmtiles?v=${encodeURIComponent(info.version || "")}`,
+    url: `/maps/${encodeURIComponent(info.id)}.pmtiles?v=${encodeURIComponent(info.version || "")}`,
     flavor: "light",
     lang: "en",
     maxDataZoom: info.max_zoom,
@@ -45,6 +46,7 @@ function showTab(name) {
     }
     map.invalidateSize();  // Leaflet needs this after the container becomes visible
   }
+  if (name === "explore") loadTrails();
   if (name === "messages") loadMessages();
   if (name === "debug") {
     loadDebug();
@@ -69,7 +71,7 @@ document.querySelectorAll(".tab").forEach((t) =>
 loadMessages();  // Messages is the tab shown on load
 startLocationUpdates();
 
-// The global data (water sources, campsites, trails) and the offline map arrive
+// The global data (water sources, campsites, trails) and the offline maps arrive
 // from the server during sync; redraw them when a new copy lands, without
 // reloading the page.
 const GLOBAL_CHECK_MS = 10000;
@@ -77,21 +79,17 @@ let globalVersion;
 async function checkGlobalData() {
   try {
     const { version } = await fetch("/api/global/info").then((r) => r.json());
-    // Before the Map tab is first opened there's nothing drawn yet to update
-    if (map && globalVersion !== undefined && version !== globalVersion) {
-      loadGlobalLocales();
-      loadTrails();
+    // Before the Map tab is first opened there are no locales drawn yet to update
+    if (globalVersion !== undefined && version !== globalVersion) {
+      if (map) loadGlobalLocales();
+      loadTrails();  // also refreshes the Explore list
     }
     globalVersion = version;
 
-    const mapInfo = await fetch("/api/map/info").then((r) => r.json());
-    if (mapInfo.version !== window.MAP_INFO.version || mapInfo.name !== window.MAP_INFO.name) {
-      const hadMap = Boolean(window.MAP_INFO.name);
-      window.MAP_INFO = mapInfo;  // initMap() uses it if the Map tab isn't open yet
-      if (map) {
-        showMapData(mapInfo);
-        if (!hadMap) map.setView(mapInfo.center, Math.min(mapInfo.min_zoom + 5, mapInfo.max_zoom));
-      }
+    const maps = await fetch("/api/maps").then((r) => r.json());
+    if (JSON.stringify(maps) !== JSON.stringify(window.MAPS)) {
+      window.MAPS = maps;  // initMap() uses them if the Map tab isn't open yet
+      if (map) showTrailMap(false);
     }
   } catch (err) {
     // The local app is always reachable; just try again next time

@@ -4,14 +4,15 @@ Every device that can reach it sends what it has and gets back what other device
 sent. It stores the same shared tables as the user app (using its database.py)
 plus a users table that keeps names unique, and the master copy of the global
 data (water sources, campsites, trails; using its global_database.py) and of
-the offline map (map/map.pmtiles and map/map.json), which devices get during sync
-whenever their copy differs.
+the offline maps (map/<id>.pmtiles and map/<id>.json, one pair per map; see
+user_app/maps.py), which devices get during sync whenever their copy differs.
 
 Usage:
     gunicorn server:app                  # production (settings in gunicorn.conf.py)
     python server.py                     # development, http://127.0.0.1:8000
     python server.py --host 0.0.0.0      # development, reachable (and discoverable) on the wifi
     python server.py --load-global FILE  # replace the global data (devices get it on next sync)
+    python download_map.py --trail ID        # download map tiles around a trail, for map/
 
 Open the server's address in a browser to see everything in its database.
 
@@ -19,23 +20,21 @@ API
     GET    /api/health                   is the server up, and its server_id
     POST   /api/register                 reserve a name {name, device_id?} -> {name, device_id}
     POST   /api/sync                     {device_id, name, cursor, records, global_version?,
-                                          map_version?}
+                                          maps? {id: version}}
                                          -> {cursor, records, merged, server_id, global_version,
                                              global (only when the device's global_version differs),
-                                             map_version, map {version, size, info} (only when
-                                             the device's map_version differs)}
+                                             maps {id: {version, size, info}} (every map, when the
+                                             device sent maps; it downloads the ones it lacks)}
     GET    /api/global                   all global data {version, locales, trails (GPX)}
     GET    /api/global_locales           global locales, for the database page
     GET    /api/global_trails            global trails without their GPX, for the database page
-    GET    /api/map.json                 the offline map's info {name, bbox, ..., version}
-    GET    /api/map.pmtiles              the offline map itself (devices download it after sync)
+    GET    /api/maps                     every offline map's info {id: {name, bbox, ..., version}}
+    GET    /api/maps/<id>.pmtiles        one offline map (devices download it after sync)
     GET    /api/users                    every registered name
     GET    /api/<table>?since=<time>     locales, messages, geolocations, tombstones
 """
 
 import argparse
-import hashlib
-import json
 import os
 import secrets
 import sqlite3
@@ -51,17 +50,17 @@ sys.path.insert(0, str(HERE.parent / "user_app"))  # share database.py with the 
 import discovery  # noqa: E402
 from database import SHARED_TABLES, Database, check_name  # noqa: E402
 from global_database import GlobalDatabase, read_load_file  # noqa: E402
+from maps import file_version, map_files, read_maps  # noqa: E402
 
 DB_PATH = Path(os.environ.get("SERVER_DB", HERE / "data" / "server.db"))
 # The public URL is https://heuslerene.com/server, and the tunnel passes the path
 # on unchanged. Requests work with or without it, so the wifi address still works.
 URL_PREFIX = os.environ.get("URL_PREFIX", "/server").rstrip("/")
-# Loaded into an empty global database on first start: the user app's sample
-# water sources and campsites, and the Gainesville-Hawthorne trail
-GLOBAL_SEED = Path(os.environ.get("GLOBAL_SEED",
-                                  HERE.parent / "user_app" / "sample_global_locales.json"))
-# The offline map devices get: map.pmtiles (Protomaps vector tiles) and map.json
-# (its name, bounds and zoom levels, as written by user_app/download_locales.py)
+# Loaded into an empty global database on first start: the sample water sources
+# and campsites, and the trails' GPX files in global/trails/
+GLOBAL_SEED = Path(os.environ.get("GLOBAL_SEED", HERE / "global" / "global_data.json"))
+# The offline maps devices get: <id>.pmtiles (Protomaps vector tiles) and <id>.json
+# (its name, bounds, zoom levels and trail, as written by download_map.py)
 MAP_DIR = Path(os.environ.get("MAP_DIR", HERE / "map"))
 
 USERS_SCHEMA = """
@@ -82,20 +81,18 @@ CREATE TABLE IF NOT EXISTS server_info (
 """
 
 
-def read_map(map_dir):
-    """The map in map_dir as {path, version, size, info}, or None if there isn't one.
+def read_server_maps(map_dir):
+    """The maps in map_dir as {id: {path, version, size, info}}.
 
-    Its version is the file's SHA-256, so devices can check what they downloaded.
+    A map's version is its file's SHA-256, so devices can check what they downloaded.
     """
-    tiles, info_file = Path(map_dir) / "map.pmtiles", Path(map_dir) / "map.json"
-    if not (tiles.exists() and info_file.exists()):
-        return None
-    digest = hashlib.sha256()
-    with tiles.open("rb") as f:
-        for chunk in iter(lambda: f.read(1 << 20), b""):
-            digest.update(chunk)
-    return {"path": tiles, "version": digest.hexdigest(), "size": tiles.stat().st_size,
-            "info": json.loads(info_file.read_text())}
+    maps = {}
+    for map_id, info in read_maps(map_dir).items():
+        tiles, _ = map_files(map_dir, map_id)
+        info.pop("version", None)  # the file decides the version, not what the info says
+        maps[map_id] = {"path": tiles, "version": file_version(tiles),
+                        "size": tiles.stat().st_size, "info": info}
+    return maps
 
 
 class Server:
@@ -105,7 +102,7 @@ class Server:
         self.global_db = GlobalDatabase(Path(path).with_name("global.db"))
         if self.global_db.info()["version"] is None and global_seed and global_seed.exists():
             self.global_db.load(read_load_file(global_seed))
-        self.map = read_map(map_dir) if map_dir else None
+        self.maps = read_server_maps(map_dir) if map_dir else {}
         with self.connect() as conn:
             conn.execute("PRAGMA journal_mode = WAL")  # readers don't block the writer
             conn.executescript(USERS_SCHEMA)
@@ -132,7 +129,8 @@ class Server:
         return {"name": name, "device_id": device_id}
 
     def sync(self, name, device_id, cursor, records, global_version=None, wants_global=False,
-             map_version=None, wants_map=False):
+             map_versions=None):
+        """map_versions: the device's {map id: version}, or None if it doesn't take maps."""
         # Collect what the device is missing before merging what it sent,
         # so it doesn't get its own records straight back
         outgoing, new_cursor = self.db.changes(cursor)
@@ -151,13 +149,11 @@ class Server:
             result["global_version"] = ours
             if ours is not None and global_version != ours:
                 result["global"] = self.global_db.export()
-        if wants_map:
-            # Only say a new map is there; it's too big for the sync answer, so the
-            # device downloads it from /api/map.pmtiles
-            ours = self.map["version"] if self.map else None
-            result["map_version"] = ours
-            if ours is not None and map_version != ours:
-                result["map"] = {k: self.map[k] for k in ("version", "size", "info")}
+        if map_versions is not None:
+            # Only list the maps; they're too big for the sync answer, so the device
+            # downloads the ones it lacks from /api/maps/<id>.pmtiles
+            result["maps"] = {map_id: {k: m[k] for k in ("version", "size", "info")}
+                              for map_id, m in self.maps.items()}
         return result
 
     def list_users(self):
@@ -240,19 +236,17 @@ def create_app(path=DB_PATH, prefix=URL_PREFIX, map_dir=MAP_DIR):
         cursor = float(cursor) if cursor is not None else None
         return jsonify(server.sync(data["name"], data["device_id"], cursor, records,
                                    data.get("global_version"), "global_version" in data,
-                                   data.get("map_version"), "map_version" in data))
+                                   data.get("maps")))
 
-    @app.get("/api/map.json")
-    def map_info():
-        if server.map is None:
-            return jsonify(error="this server has no map"), 404
-        return jsonify(dict(server.map["info"], version=server.map["version"]))
+    @app.get("/api/maps")
+    def maps_info():
+        return jsonify({map_id: dict(m["info"], version=m["version"]) for map_id, m in server.maps.items()})
 
-    @app.get("/api/map.pmtiles")
-    def map_file():
-        if server.map is None:
-            return jsonify(error="this server has no map"), 404
-        return send_file(server.map["path"], mimetype="application/octet-stream",
+    @app.get("/api/maps/<map_id>.pmtiles")
+    def map_file(map_id):
+        if map_id not in server.maps:
+            return jsonify(error="this server has no such map"), 404
+        return send_file(server.maps[map_id]["path"], mimetype="application/octet-stream",
                          conditional=True)
 
     @app.get("/api/users")
@@ -307,7 +301,7 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--load-global", type=Path, metavar="FILE",
                         help="replace the global data with a JSON file (format: "
-                             "user_app/sample_global_locales.json) and exit")
+                             "global/global_data.json) and exit")
     args = parser.parse_args()
     if args.load_global:
         print(app.config["SERVER"].global_db.load(read_load_file(args.load_global)))

@@ -92,7 +92,7 @@ class TrailNetwork:
         """Connect a line's end to the nearest other trail, if it's close and not already."""
         if self.lines_at[node] - {line}:
             return  # already meets another trail here
-        snap = self.snap(self.nodes[node], skip_line=line)
+        snap = self.snap(self.nodes[node], skip_line=line, max_offset=JOIN_DISTANCE)
         if snap is None or snap.offset > JOIN_DISTANCE:
             return
         self._connect(node, self._split(snap), snap.offset)
@@ -121,8 +121,11 @@ class TrailNetwork:
 
     # -- nearest point on a trail ---------------------------------------------------
 
-    def snap(self, point, skip_line=None):
-        """The nearest point on any trail to `point`, or None if there are no trails."""
+    def snap(self, point, skip_line=None, max_offset=None):
+        """The nearest point on any trail to `point`, or None if there are no trails.
+
+        With max_offset (meters), only looks that far: trails can be a continent
+        apart, and searching the cells in between would take minutes."""
         if self.bounds is None:
             return None
         lat, lon = point
@@ -132,6 +135,8 @@ class TrailNetwork:
         # Past this many rings every cell with a segment in it has been checked
         min_x, min_y, max_x, max_y = self.bounds
         last_ring = max(cx - min_x, max_x - cx, cy - min_y, max_y - cy)
+        if max_offset is not None:
+            last_ring = min(last_ring, math.ceil(max_offset / ring) + 1)
         best = None
         for k in range(last_ring + 1):
             # Everything within k-1 rings has been checked; nothing further can beat best

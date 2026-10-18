@@ -10,7 +10,7 @@ is what user locale records (reviews/comments) refer to in their `location`.
 Global trails are routes, sent as GPX, always drawn on the map.
 
 Usage (load a JSON file in the format the server sends, e.g. for testing offline):
-    python global_database.py load sample_global_locales.json
+    python global_database.py load ../server/global/global_data.json
 """
 
 import argparse
