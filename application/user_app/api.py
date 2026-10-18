@@ -311,6 +311,7 @@ def connection():
     if not near:
         return jsonify(state="none", via=None, detail="no server, and nobody in radio range")
 
+    # The detail stays generic ("a nearby device"): the button is shared by every chat
     names = peer_names(db())
     fresh = {g["user"].lower(): g for g in db().list("geolocations") if now - g["time_created"] < POSITION_FRESH}
     device = db().get_device()
@@ -323,14 +324,14 @@ def connection():
         if (p["heard_on"] == "ESP-NOW"
                 or (session and session["peer"] == p["id"] and session["radio"] == "ESP-NOW")
                 or (y and y["ok"] and y["radio"] == "ESP-NOW" and now - y["at"] < NEARBY)):
-            return jsonify(state="fast", via="ESP-NOW", detail=f"{name} is in ESP-NOW range")
+            return jsonify(state="fast", via="ESP-NOW", detail="a nearby device is in ESP-NOW range")
         them = fresh.get(name.lower())
         if has_espnow and me and them:
             d = distance_m((me["latitude"], me["longitude"]), (them["latitude"], them["longitude"]))
             if d <= node.cfg.espnow_range:
-                return jsonify(state="fast", via="ESP-NOW", detail=f"{name} is {round(d)} m away (ESP-NOW)")
-    who = ", ".join(names.get(p["id"], f"device {p['id']:08x}") for p in near)
-    return jsonify(state="lora", via="LoRa", detail=f"{who} in LoRa range")
+                return jsonify(state="fast", via="ESP-NOW", detail=f"a device is {round(d)} m away (ESP-NOW range)")
+    count = f"{len(near)} devices" if len(near) > 1 else "a device"
+    return jsonify(state="lora", via="LoRa", detail=f"{count} in LoRa range")
 
 
 @api.get("/contacts")

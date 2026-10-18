@@ -303,15 +303,15 @@ async function updateQueuedStatus(device, tombstones) {
   const q = queued;
   let how = null;
   if (tombstones.some((t) => t.reason === "delivered" && `${t.target_origin_id}/${t.target_seq}` === q.key)) {
-    how = `Delivered to ${q.label}.`;
+    how = "Delivered.";
   } else if (device.last_push && device.last_push >= q.received) {
-    how = "Sent (via the server).";
+    how = "Sent via the server.";
   } else {
     // A mesh exchange that finished after the message was written and sent something
     const mesh = await fetch("/api/mesh").then((r) => r.json()).catch(() => null);
     const peers = (mesh && mesh.node && mesh.node.peers) || [];
     const hop = peers.find((p) => p.last_sync && p.last_sync.ok && p.last_sync.at >= q.received && p.last_sync.sent > 0);
-    if (hop) how = `Sent (passed to ${hop.name} over ${hop.last_sync.radio}).`;
+    if (hop) how = `Sent over ${hop.last_sync.radio}.`;
   }
   if (!how || queued !== q) return;
   queued = null;
