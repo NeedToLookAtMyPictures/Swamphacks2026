@@ -1,5 +1,5 @@
-// Mesh status, at the top of the Debug tab: what the radio is doing (board, nearby
-// hikers, the current sync, recent activity), plus the badge on the Debug tab button. Also arrivalText(), used by the Messages,
+// Mesh status, at the top of the Mesh tab (drawn as tables like the database below): what the radio is doing (board, nearby
+// hikers, the current sync, recent activity). Also arrivalText(), used by the Messages,
 // Map and Debug views to say how a record reached this device.
 
 function meshEl(tag, text, className) {
@@ -46,7 +46,7 @@ function arrivalNote(row) {
   return meshEl("div", text, `via-note via-${via}`);
 }
 
-// ---- mesh status (top of the Debug tab) -------------------------------------------
+// ---- mesh status (top of the Mesh tab) --------------------------------------------
 
 const MESH_REFRESH_MS = 2000;
 const NEARBY_S = 60;  // matches NEARBY in api.py
@@ -63,59 +63,51 @@ function signalBars(rssi, radio) {
   return "▂▄▆█".slice(0, bars).padEnd(4, "·");
 }
 
+// The mesh status is drawn as tables, so it shares the Mesh tab's table styling
+// (#debug table / th / td in style.css) with the database tables below it.
 function kv(label, value) {
-  const row = meshEl("div", undefined, "mesh-kv");
-  row.append(meshEl("span", label, "mesh-k"), meshEl("span", value, "mesh-v"));
+  const row = meshEl("tr");
+  row.append(meshEl("th", label), meshEl("td", value));
   return row;
 }
 
-function renderBadge(data) {
-  const badge = document.getElementById("mesh-badge");
-  let state = "off";
-  let text = "off";
-  if (data.enabled) {
-    const node = data.node;
-    if (data.board && !data.board.connected) {
-      state = "error";
-      text = "no board";
-    } else if (!node) {
-      state = "idle";
-      text = "starting";
-    } else if (node.session) {
-      state = "syncing";
-      text = `syncing · ${node.session.radio}`;
-    } else {
-      state = node.nearby ? "ok" : "idle";
-      text = node.nearby ? `${node.nearby} nearby` : "listening";
-    }
-  }
-  badge.className = `mesh-badge ${state}`;
-  badge.textContent = text;
+function meshTable(columns, rows) {
+  const table = meshEl("table");
+  const head = table.createTHead().insertRow();
+  columns.forEach((c) => head.appendChild(meshEl("th", c)));
+  const body = table.createTBody();
+  rows.forEach((cells) => {
+    const tr = body.insertRow();
+    cells.forEach((value) => tr.appendChild(meshEl("td", value)));
+  });
+  const wrap = meshEl("div", undefined, "debug-table-wrap");
+  wrap.appendChild(table);
+  return wrap;
 }
 
 function renderBoard(data) {
   const box = document.getElementById("mesh-board");
   const rows = [];
   const b = data.board;
-  rows.push(kv("Board", `${data.board_kind === "heltec" ? "Heltec LoRa (LoRa + ESP-NOW)" : "ESP-NOW"} on ${data.port}`));
+  rows.push(kv("board", `${data.board_kind === "heltec" ? "Heltec LoRa (LoRa + ESP-NOW)" : "ESP-NOW"} on ${data.port}`));
   if (b) {
-    rows.push(kv("Connection", b.connected ? `connected${b.mac ? ` · ${b.mac}` : ""}` : "board unplugged, waiting for it"));
+    rows.push(kv("connection", b.connected ? `connected${b.mac ? ` · ${b.mac}` : ""}` : "board unplugged, waiting for it"));
     if (b.lora) {
       const lo = b.lora;
-      rows.push(kv("LoRa", `${lo.on ? "on" : "off"} · ${lo.freq_mhz.toFixed(1)} MHz, SF${lo.sf}, ${lo.bw_khz} kHz, ${lo.power_dbm} dBm`));
+      rows.push(kv("lora", `${lo.on ? "on" : "off"} · ${lo.freq_mhz.toFixed(1)} MHz, SF${lo.sf}, ${lo.bw_khz} kHz, ${lo.power_dbm} dBm`));
       if (lo.sent !== null && lo.sent !== undefined) {
-        rows.push(kv("", `sent ${lo.sent} · received ${lo.received} · corrupted ${lo.crc_errors} · on air ${(lo.airtime_ms / 1000).toFixed(1)} s`));
+        rows.push(kv("lora_traffic", `sent ${lo.sent} · received ${lo.received} · corrupted ${lo.crc_errors} · on air ${(lo.airtime_ms / 1000).toFixed(1)} s`));
       }
     }
     const en = b.espnow;
-    rows.push(kv("ESP-NOW", `${en.on ? "on" : "off"}${en.sent !== null && en.sent !== undefined ? ` · sent ${en.sent} · received ${en.received}` : ""}`));
+    rows.push(kv("esp_now", `${en.on ? "on" : "off"}${en.sent !== null && en.sent !== undefined ? ` · sent ${en.sent} · received ${en.received}` : ""}`));
   }
   const node = data.node;
   if (node) {
-    rows.push(kv("Mesh id", node.id));
-    rows.push(kv("Mode", node.always_on ? "radio always on (demo)" : `duty cycled · radio ${node.awake ? "awake" : "asleep"}`));
+    rows.push(kv("mesh_id", node.id));
+    rows.push(kv("mode", node.always_on ? "radio always on (demo)" : `duty cycled · radio ${node.awake ? "awake" : "asleep"}`));
   } else if (data.enabled) {
-    rows.push(kv("Mesh", "starts once this device is set up (Debug tab)"));
+    rows.push(kv("mesh", "starts once this device is set up (below)"));
   }
   box.replaceChildren(...rows);
 }
@@ -123,54 +115,49 @@ function renderBoard(data) {
 function renderPeers(node) {
   const now = node.now;
   const session = document.getElementById("mesh-session");
+  session.hidden = !node.session;
   if (node.session) {
-    const s = node.session;
-    session.replaceChildren(meshEl("div",
-      `Syncing with ${s.peer_name} over ${s.radio} (started ${ago(s.started, now)})`, "mesh-syncing"));
-  } else {
-    session.replaceChildren();
+    const sy = node.session;
+    session.textContent = `Syncing with ${sy.peer_name} over ${sy.radio} (started ${ago(sy.started, now)})`;
   }
 
   const nearby = node.peers.filter((p) => p.last_heard && now - p.last_heard < NEARBY_S).length;
-  document.getElementById("mesh-nearby-count").textContent =
-    node.peers.length ? `${nearby} of ${node.peers.length} heard in the last minute` : "";
+  document.getElementById("mesh-nearby-title").textContent =
+    node.peers.length ? `nearby (${nearby} of ${node.peers.length} heard in the last minute)` : "nearby (0)";
 
   const list = document.getElementById("mesh-peers");
   if (!node.peers.length) {
-    list.replaceChildren(meshEl("p", "Nobody heard yet. Other hikers show up here when their radio is in range.", "mesh-note"));
+    list.replaceChildren(meshEl("p", "nobody heard yet: other hikers show up here when their radio is in range", "debug-empty"));
     return;
   }
-  list.replaceChildren(...node.peers.map((p) => {
-    const row = meshEl("div", undefined, "mesh-peer");
-    const fresh = p.last_heard && now - p.last_heard < NEARBY_S;
-    if (!fresh) row.classList.add("stale");
-    const head = meshEl("div", undefined, "mesh-peer-head");
-    head.append(meshEl("strong", p.name),
-                meshEl("span", p.heard_on ? `${signalBars(p.rssi, p.heard_on)} ${p.rssi} dBm · ${p.heard_on}` : "", "mesh-signal"));
-    row.appendChild(head);
-    const bits = [];
-    if (p.last_heard) bits.push(`heard ${ago(p.last_heard, now)}`);
-    if (p.last_sync) {
-      const y = p.last_sync;
-      bits.push(y.ok ? `synced ${ago(y.at, now)} over ${y.radio} (got ${y.received}, sent ${y.sent})`
-                     : `last sync failed ${ago(y.at, now)} over ${y.radio}`);
-    }
-    row.appendChild(meshEl("div", bits.join(" · "), "mesh-note"));
-    return row;
-  }));
+  const rows = node.peers.map((p) => {
+    const y = p.last_sync;
+    return [
+      p.name,
+      p.heard_on ? `${signalBars(p.rssi, p.heard_on)} ${p.rssi} dBm` : "–",
+      p.heard_on || "–",
+      p.last_heard ? ago(p.last_heard, now) : "–",
+      !y ? "never" : y.ok ? `ok ${ago(y.at, now)} over ${y.radio} (got ${y.received}, sent ${y.sent})`
+                          : `failed ${ago(y.at, now)} over ${y.radio}`,
+    ];
+  });
+  const table = meshTable(["name", "signal", "heard_on", "last_heard", "last_sync"], rows);
+  // Hikers not heard in the last minute: dimmed, like dead rows in the database tables
+  table.querySelectorAll("tbody tr").forEach((tr, i) => {
+    const p = node.peers[i];
+    if (!(p.last_heard && now - p.last_heard < NEARBY_S)) tr.classList.add("stale");
+  });
+  list.replaceChildren(table);
 }
 
 function renderEvents(data, now) {
   const list = document.getElementById("mesh-events");
+  document.getElementById("mesh-events-title").textContent = `recent_activity (${data.events.length})`;
   if (!data.events.length) {
-    list.replaceChildren(meshEl("p", "Nothing yet.", "mesh-note"));
+    list.replaceChildren(meshEl("p", "empty", "debug-empty"));
     return;
   }
-  list.replaceChildren(...data.events.map((e) => {
-    const row = meshEl("div", undefined, "mesh-event");
-    row.append(meshEl("span", ago(e.at, now), "mesh-event-time"), meshEl("span", e.text));
-    return row;
-  }));
+  list.replaceChildren(meshTable(["when", "what_happened"], data.events.map((e) => [ago(e.at, now), e.text])));
 }
 
 let lastMesh = null;
@@ -183,9 +170,9 @@ function renderMesh(data) {
   renderBoard(data);
   if (data.node) renderPeers(data.node);
   else {
-    document.getElementById("mesh-session").replaceChildren();
+    document.getElementById("mesh-session").hidden = true;
     document.getElementById("mesh-peers").replaceChildren();
-    document.getElementById("mesh-nearby-count").textContent = "";
+    document.getElementById("mesh-nearby-title").textContent = "nearby";
   }
   renderEvents(data, now);
 }
@@ -193,12 +180,12 @@ function renderMesh(data) {
 async function loadMesh() {
   const data = await fetch("/api/mesh").then((r) => r.json());
   lastMesh = data;
-  renderBadge(data);
-  if (document.getElementById("debug").classList.contains("active")) renderMesh(data);
+  renderMesh(data);
 }
 
-// The badge is always visible, so keep polling while the page is shown
-loadMesh().catch(() => {});
+// Refresh while the Mesh tab is open (showTab() in app.js loads it when the tab opens)
 setInterval(() => {
-  if (!document.hidden) loadMesh().catch(() => {});  // the local app is always reachable; try again next time
+  if (!document.hidden && document.getElementById("debug").classList.contains("active")) {
+    loadMesh().catch(() => {});  // the local app is always reachable; try again next time
+  }
 }, MESH_REFRESH_MS);

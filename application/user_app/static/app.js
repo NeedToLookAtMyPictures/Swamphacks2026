@@ -48,7 +48,7 @@ function showTab(name) {
   if (name === "messages") loadMessages();
   if (name === "debug") {
     loadDebug();
-    loadMesh();  // the mesh status sits at the top of the Debug tab
+    loadMesh();  // the mesh status sits at the top of the Mesh tab
   }
 }
 

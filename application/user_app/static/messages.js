@@ -134,7 +134,7 @@ async function loadMessages() {
     lastSnapshot = null;
     document.getElementById("chat-list").replaceChildren();
     document.getElementById("chat-title").textContent = "";
-    list.replaceChildren(msgEl("p", "Set up this device first (Debug tab).", "message-note"));
+    list.replaceChildren(msgEl("p", "Set up this device first (Mesh tab).", "message-note"));
     return;
   }
   myName = (await deviceRes.json()).name;
