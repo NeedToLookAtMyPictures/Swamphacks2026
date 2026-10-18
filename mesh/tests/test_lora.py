@@ -195,6 +195,13 @@ class RadioSwitchTests(unittest.TestCase):
         self.assertIsNotNone(got())
         return self.ends[0]
 
+    def send_locale(self, seconds=60):
+        a, b = self.nodes
+        loc = a.store.db.add_locale("spring-1203", "Mile 1203 spring", "w" * 2000)
+        got = lambda: b.store.db.get("locales", loc["origin_id"], loc["seq"])  # noqa: E731
+        run(self.nodes, self.clock, seconds, until=lambda: got() and all(n.session is None for n in self.nodes))
+        return got()
+
     def received_via(self):
         a, b = self.nodes
         return b.store.db.list("locales")[0]["received_via"]
@@ -214,6 +221,20 @@ class RadioSwitchTests(unittest.TestCase):
         self.assertEqual(self.espnow_frames, [])
         a, b = self.nodes
         self.assertEqual(b.store.db.get_location("alice")["latitude"], 29.65, "positions travel over LoRa too")
+
+    def test_unknown_positions_try_espnow(self):
+        self.assertIsNotNone(self.send_locale())  # no GPS fix on either side (e.g. indoors)
+        self.assertTrue(self.ends[0].fast and self.ends[0].ok)
+        self.assertEqual(self.received_via(), "ESP-NOW")
+
+    def test_unknown_positions_fall_back_to_lora_when_espnow_is_out_of_reach(self):
+        self.espnow.in_range = lambda x, y: False  # actually too far for ESP-NOW
+        self.assertIsNotNone(self.send_locale(seconds=120))
+        a = self.nodes[0]
+        mine = [s for s in self.ends if s.my_id == a.id]
+        self.assertTrue(mine[0].fast and not mine[0].ok, "first try: ESP-NOW, which fails")
+        self.assertTrue(not mine[-1].fast and mine[-1].ok, "then LoRa")
+        self.assertEqual(self.received_via(), "LoRa")
 
 
 @unittest.skipIf(database is None, "the app's database.py isn't available (no checkout or git main)")

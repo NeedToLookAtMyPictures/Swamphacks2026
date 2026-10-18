@@ -357,6 +357,7 @@ async function updateSendButton() {
   const text = c.state === "none" ? `${c.detail}; the message waits and goes out once someone is` : c.detail;
   button.title = `${CONNECTION_TEXT[c.state]}: ${text}`;
   button.setAttribute("aria-label", `Send, ${CONNECTION_TEXT[c.state]}`);
+  document.getElementById("compose-connection").textContent = CONNECTION_TEXT[c.state];
 }
 
 // Touch screens have no hover, so the button's title tooltip never shows there: show the

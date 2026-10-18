@@ -24,7 +24,7 @@ talk directly to each other. It is not LoRaWAN, which needs gateways.
 
 | Mode | Discovery + handshake | Exchange | Use it to |
 |---|---|---|---|
-| `auto` (default) | LoRa | ESP-NOW if both positions are known and within 60 m, else LoRa | normal use |
+| `auto` (default) | LoRa | ESP-NOW unless both positions are known and over 60 m apart, else LoRa | normal use |
 | `lora` | LoRa | LoRa, at any distance | test LoRa with the boards side by side |
 | `espnow` | ESP-NOW | ESP-NOW (like espnow_bridge) | test ESP-NOW on its own |
 
@@ -66,16 +66,17 @@ python main.py --mesh-port auto --mesh-board heltec --multiple-boards --mesh-dem
 1. Beacons and HELLO / HELLO_ACK always go over LoRa. HELLO and HELLO_ACK carry
    the sender's position (from the app's database, at most `position_max_age`
    = 5 min old) and flags: has a fix, can switch to ESP-NOW.
-2. The **responder** decides. If both sides can switch, both positions are
-   known, and they are within `espnow_range` (60 m), its HELLO_ACK says "use
-   ESP-NOW". Both sides turn ESP-NOW on and send everything after the handshake
+2. The **responder** decides. If both sides can switch and they are not known
+   to be further apart than `espnow_range` (60 m), its HELLO_ACK says "use
+   ESP-NOW". A missing or stale position (no GPS fix indoors, location
+   permission off) still tries ESP-NOW: step 4 catches a peer that was far. Both sides turn ESP-NOW on and send everything after the handshake
    there, with ESP-NOW timings.
 3. Otherwise the whole exchange (INV, WANT, DATA) runs over LoRa, with
    **positions (pins) sent first**, then comments, messages and tombstones.
 4. ESP-NOW is on only during an ESP-NOW exchange (plus a few seconds after, to
-   confirm the last frames). If an ESP-NOW exchange fails (the positions were
-   stale, or 60 m was optimistic), that peer gets LoRa for `espnow_retry`
-   (5 min).
+   confirm the last frames). If an ESP-NOW exchange fails (a position was
+   unknown or stale, or 60 m was optimistic), that peer gets LoRa for
+   `espnow_retry` (5 min).
 
 ## LoRa settings (`lora.LoRaParams`, `--sf`)
 

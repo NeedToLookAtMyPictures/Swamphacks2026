@@ -325,6 +325,10 @@ main {
 
 #compose-status { color: #555; font-size: 14px; }
 
+/* Visible version of the Send button's tooltip: phones can't hover to see the title */
+.compose-send-wrap { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+#compose-connection { color: #555; font-size: 12px; text-align: right; }
+
 /* Send button colour = how fast a message would leave right now (messages.js updateSendButton) */
 #compose button.send-fast { background: #1f6fb2; }  /* server or ESP-NOW */
 #compose button.send-lora { background: #2e5a43; }  /* LoRa only: the app's usual green */

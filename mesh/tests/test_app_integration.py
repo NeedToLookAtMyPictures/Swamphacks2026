@@ -194,6 +194,12 @@ class ConnectionStateTests(unittest.TestCase):
         self.assertIn("m away", c["detail"])
         self.assertNotIn("alice", c["detail"])
 
+    def test_close_peer_without_positions_is_fast(self):
+        nodes = self.nodes(lora=True, espnow=True)                     # no GPS fix on either side
+        self.hear_each_other(nodes)
+        c = self.state(self.bob)
+        self.assertEqual((c["state"], c["via"]), ("fast", "ESP-NOW"))
+
     def test_peer_heard_on_espnow_is_fast(self):
         nodes = self.nodes(lora=False, espnow=True)
         self.hear_each_other(nodes)
