@@ -11,7 +11,8 @@ subcommand.
 
 The map is a Protomaps vector basemap (OpenStreetMap data). `map` cuts the
 requested area out of the latest daily Protomaps world build using HTTP range
-requests and saves it as a single .pmtiles file.
+requests and saves it as data/maps/<name>.pmtiles, next to the maps the
+server sends (see maps.py).
 """
 
 import argparse
@@ -29,10 +30,11 @@ from pmtiles.reader import MmapSource, Reader
 from pmtiles.tile import zxy_to_tileid
 from pmtiles.writer import Writer
 
+from maps import map_files
+
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
-MAP_FILE = DATA_DIR / "map.pmtiles"
-MAP_INFO_FILE = DATA_DIR / "map.json"
+MAPS_DIR = DATA_DIR / "maps"  # the offline maps, see maps.py
 
 PROTOMAPS_BUILDS_URL = "https://build-metadata.protomaps.dev/builds.json"
 PROTOMAPS_BUILD_URL = "https://build.protomaps.com/{key}"
@@ -149,8 +151,10 @@ def open_source(source):
     return Reader(http_range_source(source)), source
 
 
-def extract_map(reader, source, tiles, bbox, name, min_zoom, max_zoom, map_file, info_file):
-    """Copy `tiles` [(z, x, y)] from reader into map_file, and write its info_file (map.json)."""
+def extract_map(reader, source, tiles, bbox, name, min_zoom, max_zoom, map_file, info_file,
+                trail=None):
+    """Copy `tiles` [(z, x, y)] from reader into map_file, and write its info_file
+    (see maps.py; trail is the id of the global trail the map is for, if any)."""
     tiles = sorted(tiles, key=lambda t: zxy_to_tileid(*t))
     print(f"Extracting {name} (zoom {min_zoom}-{max_zoom}, bbox {bbox})")
     print(f"  source: {source}")
@@ -198,17 +202,24 @@ def extract_map(reader, source, tiles, bbox, name, min_zoom, max_zoom, map_file,
         "center": [(min_lat + max_lat) / 2, (min_lon + max_lon) / 2],
         "min_zoom": min_zoom,
         "max_zoom": max_zoom,
+        **({"trail": trail} if trail else {}),
     }, indent=2))
     print(f"Saved {map_file} ({map_file.stat().st_size / 1e6:.1f} MB) and {info_file.name}")
 
 
+def slug(name):
+    """A map id (see maps.py) made from a name."""
+    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:64].strip("-") or "map"
+
+
 def download_map(args):
-    """Download the offline basemap into data/map.pmtiles."""
+    """Download the offline basemap into data/maps/<name>.pmtiles."""
     bbox, name = resolve_area(args)
     reader, source = open_source(args.source)
     max_zoom = min(args.max_zoom, reader.header()["max_zoom"])
+    tiles_file, info_file = map_files(MAPS_DIR, slug(name))
     extract_map(reader, source, tiles_in_bbox(bbox, args.min_zoom, max_zoom), bbox, name,
-                args.min_zoom, max_zoom, MAP_FILE, MAP_INFO_FILE)
+                args.min_zoom, max_zoom, tiles_file, info_file)
     print("Start the app with `python main.py`.")
 
 

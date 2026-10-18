@@ -166,35 +166,45 @@ python server.py --load-global my_global_data.json
 
 The database page shows it as `global_locales` and `global_trails`.
 
-## Offline map
+## Offline maps
 
-The server also keeps the offline map devices show: `map/map.pmtiles` (Protomaps
-vector tiles of Gainesville to Hawthorne, zoom 8-15, about 8 MB) and
-`map/map.json` (its name, bounds and zoom levels). Both are in the repository;
-`MAP_DIR` picks another folder. The map's version is the file's SHA-256. Devices
-send the version they have with every sync, and when it differs the reply says a
-map is available; the device then downloads `/api/map.pmtiles`, checks it
-against the version, and only then replaces its `data/map.pmtiles`. If the
-download fails the old map stays and the next sync tries again. The open page
-switches to the new map by itself within 10 seconds.
+The server also keeps the offline maps devices show, any number of them, each a
+pair of files in `map/` (see `../user_app/maps.py`): `<id>.pmtiles` (Protomaps
+vector tiles) and `<id>.json` (its name, bounds, zoom levels, and `trail`: the
+id of the global trail it was made for). The repository has
+`gainesville-hawthorne` (zoom 8-15, about 8 MB); `MAP_DIR` picks another folder.
+A map's version is its file's SHA-256. Devices send the versions they have with
+every sync, and the reply lists all the server's maps; the device downloads the
+ones it lacks or has an old version of from `/api/maps/<id>.pmtiles`, checks
+each against its version, and only then replaces its copy in `data/maps/`. It
+deletes the server maps the server no longer has (maps made on the device with
+`download_locales.py` stay). If a download fails the old map stays and the next
+sync tries again. The open page picks up new maps by itself within 10 seconds.
 
-To change it, download a new one with `download_map.py` (needs internet), copy
-it into `map/` and restart the server:
+Picking a trail in the app's Explore tab shows the map whose `trail` is that
+trail, else one whose area holds the whole trail; with neither, the trail is
+drawn on a blank background with a notice.
+
+To add one, download it with `download_map.py` (needs internet), copy it into
+`map/` and restart the server:
 
 ```bash
 python download_map.py --trail trail-john-muir-yosemite   # around one of the server's trails (499 tiles)
 python download_map.py --gpx some_trail.gpx       # or a GPX file, a --place or a --bbox
-cp downloads/john-muir-trail-yosemite-valley-section/map.* map/
+cp downloads/john-muir-yosemite.* map/
 ```
 
-It saves `map.pmtiles` and `map.json` in `downloads/<name>/` (git-ignored), so
-you can check the size first; `--out map` writes straight into `map/`. With
-`--trail` (an id from `global_data.json`: the trail is read from the server's
-`data/global.db`, or from `global_data.json` if the server hasn't started yet)
-or `--gpx` the map covers the trail plus `--margin-km` (5). Up to `--full-zoom`
-(11) it has the whole area; above that only tiles within `--corridor-km` (3) of
-the trail, so a long trail stays small (the whole John Muir Trail would be about
-4,100 tiles instead of 27,000; the Yosemite Valley section is 499). The server has one map at a time, for every device.
+It saves `<id>.pmtiles` and `<id>.json` in `downloads/` (git-ignored), so you
+can check the size first; `--out map` writes straight into `map/`. The id is the
+trail id without `trail-` (or from the name; `--id` sets it), and with `--trail`
+the map's `trail` is set. With `--trail` (an id from `global_data.json`: the
+trail is read from the server's `data/global.db`, or from `global_data.json` if
+the server hasn't started yet) or `--gpx` the map covers the trail plus
+`--margin-km` (5). Up to `--full-zoom` (11) it has the whole area; above that
+only tiles within `--corridor-km` (3) of the trail, so a long trail stays small
+(the whole John Muir Trail would be about 4,100 tiles instead of 27,000; the
+Yosemite Valley section is 499). To remove a map, delete its two files and
+restart the server.
 
 ## Relaying
 
@@ -209,9 +219,9 @@ tombstone travels back through the server to everyone else.
 | GET | `/` | page showing the whole database |
 | GET | `/api/health` | is the server up, and its `server_id` |
 | POST | `/api/register` | reserve a name `{name, device_id?}` → `{name, device_id}`; 409 if taken |
-| POST | `/api/sync` | `{device_id, name, cursor, records, global_version?, map_version?}` → `{cursor, records, merged, server_id, global_version?, global?, map_version?, map?}`; `global` and `map` only when the device's version differs (`map` is `{version, size, info}`, the file itself comes from `/api/map.pmtiles`) |
-| GET | `/api/map.json` | the offline map's info `{name, bbox, center, min_zoom, max_zoom, version}` |
-| GET | `/api/map.pmtiles` | the offline map file (supports range requests) |
+| POST | `/api/sync` | `{device_id, name, cursor, records, global_version?, maps?}` → `{cursor, records, merged, server_id, global_version?, global?, maps?}`; `global` only when the device's version differs; `maps` (`{id: {version, size, info}}`, every map) when the device sent `maps` (`{id: version}`); the files themselves come from `/api/maps/<id>.pmtiles` |
+| GET | `/api/maps` | every offline map's info `{id: {name, bbox, center, min_zoom, max_zoom, trail?, version}}` |
+| GET | `/api/maps/<id>.pmtiles` | one offline map file (supports range requests) |
 | GET | `/api/users` | every registered name |
 | GET | `/api/global` | all global data `{version, locales, trails}`, trails as GPX |
 | GET | `/api/global_locales` | global locales (for the database page) |

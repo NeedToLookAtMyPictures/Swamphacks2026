@@ -6,10 +6,13 @@ Run this while you have internet:
     python download_map.py --place "Gainesville to Hawthorne, Florida"
     python download_map.py --bbox -82.42 29.56 -82.05 29.73 --name "Gainesville to Hawthorne"
 
-It writes map.pmtiles and map.json into downloads/<name>/ (git-ignored), so you
-can look at the size before using it. To put it on the server, copy both into
-map/ and restart the server (or pass --out map to write there directly):
-    cp downloads/john-muir-trail/map.* map/
+It writes <id>.pmtiles and <id>.json into downloads/ (git-ignored), so you can
+look at the size before using it. The id is the trail's id without "trail-", or
+the name. To put it on the server, copy both into map/ next to the other maps
+and restart the server (or pass --out map to write there directly):
+    cp downloads/john-muir-yosemite.* map/
+The server sends every map in map/ to devices; with --trail, the app shows this
+map when that trail is selected in Explore.
 
 --trail reads the trail's GPX from the server's global data (data/global.db, or
 global/global_data.json if the server hasn't started yet). With --trail or
@@ -31,8 +34,9 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "user_app"))  # share the map code with the user app
 
 from download_locales import (  # noqa: E402
-    add_area_arguments, extract_map, lonlat_to_tile, open_source, resolve_area, tiles_in_bbox)
+    add_area_arguments, extract_map, lonlat_to_tile, open_source, resolve_area, slug, tiles_in_bbox)
 from global_database import GlobalDatabase, parse_gpx, read_load_file  # noqa: E402
+from maps import map_files  # noqa: E402
 
 DOWNLOADS_DIR = HERE / "downloads"
 # Same places server.py uses
@@ -89,10 +93,6 @@ def corridor_tiles(points, zoom, corridor_km):
             for y in range(max(cy - k, 0), min(cy + k, n - 1) + 1)}
 
 
-def slug(name):
-    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "map"
-
-
 def main():
     parser = argparse.ArgumentParser(description="Download offline map tiles for the server")
     area = parser.add_mutually_exclusive_group()
@@ -112,9 +112,11 @@ def main():
                              "the map still zooms further by scaling up)")
     parser.add_argument("--source",
                         help="Protomaps .pmtiles URL or local file (default: latest daily build)")
-    parser.add_argument("--out", type=Path,
-                        help="folder for map.pmtiles and map.json (default: downloads/<name>/; "
-                             "map to replace the server's map)")
+    parser.add_argument("--id", help="the map's id, its file name (default: the trail id without "
+                                     "\"trail-\", or from the name)")
+    parser.add_argument("--out", type=Path, default=DOWNLOADS_DIR,
+                        help="folder for <id>.pmtiles and <id>.json (default: downloads; "
+                             "map to add it to the server's maps)")
     args = parser.parse_args()
 
     # Find the trail first, so a wrong id fails before connecting to anything
@@ -140,13 +142,14 @@ def main():
         name = args.name or name
         tiles = set(tiles_in_bbox(bbox, args.min_zoom, max_zoom))
 
-    out = args.out or DOWNLOADS_DIR / slug(name)
-    extract_map(reader, source, tiles, bbox, name, args.min_zoom, max_zoom,
-                out / "map.pmtiles", out / "map.json")
-    if out.resolve() == (HERE / "map").resolve():
+    map_id = args.id or (args.trail.removeprefix("trail-") if args.trail else slug(name))
+    tiles_file, info_file = map_files(args.out, map_id)
+    extract_map(reader, source, tiles, bbox, name, args.min_zoom, max_zoom, tiles_file, info_file,
+                trail=args.trail)
+    if args.out.resolve() == (HERE / "map").resolve():
         print("Restart the server; devices get the new map on their next sync.")
     else:
-        print(f"To put it on the server: cp {out}/map.* map/   then restart the server.")
+        print(f"To put it on the server: cp {args.out}/{map_id}.* map/   then restart the server.")
 
 
 if __name__ == "__main__":

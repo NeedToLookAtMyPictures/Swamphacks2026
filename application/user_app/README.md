@@ -20,10 +20,11 @@ python download_locales.py map    # Gainesville to Hawthorne, FL, zoom 8-15
 
 `download_locales.py map` finds the latest daily Protomaps world build, uses HTTP range
 requests to pull only the tiles inside the area, and saves them as one file,
-`data/map.pmtiles` (git-ignored). Running it again replaces the old map.
+`data/maps/<name>.pmtiles` (git-ignored; see `maps.py`). Running it again for
+the same place replaces that map.
 
-You can skip this when the app can reach a server: it downloads the server's map
-(`application/server/map/`) during sync, and replaces a map made here with it.
+You can skip this when the app can reach a server: it downloads the server's maps
+(`application/server/map/`) into `data/maps/` during sync, next to any made here.
 
 Other areas and sources:
 
@@ -247,5 +248,5 @@ a position; start the server with `--https` for that (see Raspberry Pi above). U
   - **Last known location**: search people and check who to pin, with their name and when they were last seen
   - **Locales**: the global locales (shown by default), grouped by category; show or hide a whole category or single locales, with search
   - Clicking a global locale shrinks the map to the top half and opens a panel below it with information about the site (description, coordinates, distance along the trails from your last location, comment count) and its comments, newest first, with a box to add one. Comments are user `locales` records with `location` set to the site's id, so they sync like other records
-- **Explore**: a card per global trail; picking one draws it on the map, opens the Map tab zoomed to it and is remembered on this device. Only the selected trail is shown
+- **Explore**: a card per global trail; picking one draws it on the map, opens the Map tab zoomed to it on that trail's offline map (the one made for it, else one whose area holds it, else a blank background with a notice) and is remembered on this device. Only the selected trail is shown
 - **Debug**: shows every table in the local and global databases (refresh button; offers to create the device if it has no identity yet)

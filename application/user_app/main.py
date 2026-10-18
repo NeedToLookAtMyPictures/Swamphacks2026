@@ -37,10 +37,11 @@ from pathlib import Path
 from flask import Flask, render_template, send_file
 
 import server_sync
-from api import api, load_map_info
+from api import api, default_map_view, load_maps
 from database import Database
 from global_database import GlobalDatabase
-from download_locales import DATA_DIR, MAP_FILE
+from download_locales import DATA_DIR, MAPS_DIR
+from maps import map_files, read_maps
 
 # The demo server (the laptop running application/server), tried in this order.
 # PUBLIC_SERVER_URL is its address on the internet (server/serve_public.sh prints
@@ -67,13 +68,27 @@ app.register_blueprint(api)
 
 @app.route("/")
 def index():
-    return render_template("index.html", map_info=load_map_info())
+    return render_template("index.html", maps=load_maps(), default_map=default_map_view())
 
 
-@app.route("/map.pmtiles")
-def map_file():
+@app.route("/maps/<map_id>.pmtiles")
+def map_file(map_id):
+    if map_id not in read_maps(MAPS_DIR):
+        return "no such map", 404
     # send_file handles the HTTP range requests protomaps-leaflet makes
-    return send_file(MAP_FILE, mimetype="application/octet-stream", conditional=True)
+    return send_file(map_files(MAPS_DIR, map_id)[0], mimetype="application/octet-stream",
+                     conditional=True)
+
+
+def move_old_map():
+    """Maps used to be one data/map.pmtiles + map.json; keep one as the map "map"
+    (a server's old map is then replaced by its maps on the next sync)."""
+    old_tiles, old_info = DATA_DIR / "map.pmtiles", DATA_DIR / "map.json"
+    if old_tiles.exists() and old_info.exists():
+        tiles, info = map_files(MAPS_DIR, "map")
+        MAPS_DIR.mkdir(parents=True, exist_ok=True)
+        old_tiles.replace(tiles)
+        old_info.replace(info)
 
 
 # ---------------------------------------------------------------------------
@@ -169,8 +184,10 @@ def run(args):
         logging.getLogger("werkzeug").addFilter(HideRoutineRequests())
     if args.db:
         app.config["DATABASE"] = Database(args.db)
-    if not MAP_FILE.exists():
-        print("No offline map found. Run `python download_locales.py map` first.")
+    move_old_map()
+    if not read_maps(MAPS_DIR):
+        print("No offline map yet. It downloads from the server on the next sync, "
+              "or run `python download_locales.py map`.")
     app.config["DATABASE"].purge()
     # Before anything else starts: on Android this reruns the program (see start_mesh)
     if args.phone and not args.mesh_port:
@@ -185,7 +202,7 @@ def run(args):
     if (args.server or not args.no_lan) and (
             not args.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true"):
         print(f"Syncing with {finder.describe()} whenever it can be reached")
-        server_sync.start(app.config["DATABASE"], finder, app.config["GLOBAL_DATABASE"], DATA_DIR)
+        server_sync.start(app.config["DATABASE"], finder, app.config["GLOBAL_DATABASE"], MAPS_DIR)
     ssl_context = None
     if args.https:
         ensure_certificate()

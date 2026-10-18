@@ -1,5 +1,6 @@
 // Global trails (from the server, as GPX). The Explore tab lists them; only the
-// selected trail is drawn on the map, and picking one opens the Map tab zoomed to it.
+// selected trail is drawn on the map, and picking one opens the Map tab zoomed to it,
+// on the offline map made for it.
 
 const TRAIL_COLOR = "#ff6f00";
 const SELECTED_TRAIL_KEY = "selectedTrail";  // localStorage key, so the choice survives a reload
@@ -35,8 +36,45 @@ async function loadTrails() {
     selectedTrailId = globalTrails.length ? globalTrails[0].id : null;
   }
 
-  if (map) drawTrails();
+  if (map) {
+    drawTrails();
+    showTrailMap(false);  // the trails may have just arrived, or changed
+  }
   renderExplore();
+}
+
+function trailBounds(trail) {
+  return L.latLngBounds(trail.segments.flat());
+}
+
+function mapBounds(info) {
+  const [minLon, minLat, maxLon, maxLat] = info.bbox;
+  return L.latLngBounds([minLat, minLon], [maxLat, maxLon]);
+}
+
+// The offline map for a trail: the one made for it, else one whose area holds the whole
+// trail, else a stand-in without tiles around the trail (id null)
+function mapForTrail(trail) {
+  const bounds = trailBounds(trail);
+  const found = window.MAPS.find((m) => m.trail === trail.id)
+    || window.MAPS.find((m) => mapBounds(m).contains(bounds));
+  if (found) return found;
+  const area = bounds.pad(0.2);
+  return { id: null, name: null, version: null, min_zoom: 3, max_zoom: 15,
+           bbox: [area.getWest(), area.getSouth(), area.getEast(), area.getNorth()],
+           center: [bounds.getCenter().lat, bounds.getCenter().lng] };
+}
+
+// Show the selected trail's map (or the first map when no trail is selected). Only
+// when it isn't already shown, or `fit` asks to zoom to the trail anyway.
+function showTrailMap(fit) {
+  const trail = globalTrails.find((t) => t.id === selectedTrailId);
+  const info = trail ? mapForTrail(trail) : window.MAPS[0] || window.DEFAULT_MAP;
+  const changed = !currentMap || info.id !== currentMap.id || info.version !== currentMap.version
+    || (!info.id && (info.bbox + "") !== (currentMap.bbox + ""));
+  if (changed) showMapData(info);
+  if (trail && (fit || changed)) map.fitBounds(trailBounds(trail), { padding: [30, 30] });
+  else if (changed) map.setView(info.center, Math.min(info.min_zoom + 5, info.max_zoom));
 }
 
 function drawTrails() {
@@ -56,8 +94,7 @@ function selectTrail(id) {
   renderExplore();
   showTab("map");
   drawTrails();
-  const trail = globalTrails.find((t) => t.id === id);
-  if (trail) map.fitBounds(L.latLngBounds(trail.segments.flat()), { padding: [30, 30] });
+  showTrailMap(true);
 }
 
 function exploreCard(name, detail, selected, onClick) {

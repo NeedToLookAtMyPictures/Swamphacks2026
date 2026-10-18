@@ -50,8 +50,10 @@
     </section>
 
     <section id="map" class="panel">
-      <div id="no-map" class="notice"{% if map_info.name %} hidden{% endif %}>No offline map yet. It
+      <div id="no-map" class="notice"{% if maps %} hidden{% endif %}>No offline map yet. It
         downloads from the server on the next sync, or run <code>python download_locales.py map</code>.</div>
+      <div id="no-trail-map" class="notice" hidden>No offline map for this trail yet; the server
+        sends one on a sync once it has it.</div>
       <div id="leaflet-map"></div>
       <div id="locale-sheet" hidden>
         <div class="locale-sheet-top">
@@ -114,7 +116,10 @@
     </section>
   </main>
 
-  <script>window.MAP_INFO = {{ map_info | tojson }};</script>
+  <script>
+    window.MAPS = {{ maps | tojson }};
+    window.DEFAULT_MAP = {{ default_map | tojson }};
+  </script>
   <script src="{{ url_for('static', filename='vendor/leaflet/leaflet.js') }}"></script>
   <script src="{{ url_for('static', filename='vendor/protomaps-leaflet/protomaps-leaflet.js') }}"></script>
   <script src="{{ url_for('static', filename='messages.js') }}"></script>
