@@ -49,19 +49,24 @@ function renderTable(title, rows) {
   return section;
 }
 
+let gpsPath = null;  // positionPath() as of the last Refresh
+
 function renderGps() {
-  // This device's GPS, from location.js: is it getting fixes, and if not, why
+  // This device's GPS, from location.js: is it getting fixes, where the position
+  // got to (database, server), and if something fails, why
   const section = el("div", undefined, "debug-section");
   section.id = "gps-debug";
   section.appendChild(el("h3", "gps"));
   const rows = [
     ["attempts / fixes", `${gpsDebug.attempts} / ${gpsDebug.fixes}`],
-    ["last fix", gpsDebug.last_fix ? `${formatValue("time_created", gpsDebug.last_fix.time)}: ` +
+    ["from the phone (last fix)", gpsDebug.last_fix ? `${formatValue("time_created", gpsDebug.last_fix.time)}: ` +
       `${gpsDebug.last_fix.latitude.toFixed(6)}, ${gpsDebug.last_fix.longitude.toFixed(6)} ` +
       `±${gpsDebug.last_fix.accuracy_m} m` : "none yet"],
     ["last error", gpsDebug.last_error ? `${formatValue("time_created", gpsDebug.last_error.time)}: ` +
       `${gpsDebug.last_error.error} ${gpsDebug.last_error.message}` : "none"],
     ["last save", gpsDebug.last_save || "—"],
+    ...(gpsPath ? gpsPath.rows : []),
+    ...(gpsPath ? gpsPath.advice.map((a, i) => [i === 0 ? "problem" : "", a]) : []),
   ];
   const check = gpsDebug.check;
   if (check) {
@@ -143,8 +148,10 @@ async function loadDebug() {
       Object.values(GLOBAL_DEBUG_TABLES).map((url) => fetch(url).then((r) => r.json())));
 
     content.replaceChildren();
-    if (deviceRes.ok) {
-      content.appendChild(renderTable("device_info", [await deviceRes.json()]));
+    const device = deviceRes.ok ? await deviceRes.json() : null;
+    gpsPath = positionPath(device, server, tables[DEBUG_TABLES.indexOf("geolocations")]);
+    if (device) {
+      content.appendChild(renderTable("device_info", [device]));
     } else {
       renderDeviceSetup(content, server);
     }

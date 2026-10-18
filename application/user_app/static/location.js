@@ -27,10 +27,54 @@ const gpsDebug = {
   last_fix: null,    // {time, latitude, longitude, accuracy_m}
   last_error: null,  // {time, code, error, message}
   last_save: null,   // what PUT /api/location answered
+  last_sent: null,   // {time, latitude, longitude} as sent to PUT /api/location
   check: null,       // runGpsCheck() result: {time, running, findings: [[name, value]], advice: [...]}
 };
 
+function formatPosition(lat, lon) {
+  return `${lat.toFixed(6)}, ${lon.toFixed(6)}`;
+}
+
+function formatTime(seconds) {
+  return new Date(seconds * 1000).toLocaleString();
+}
+
+// Where the position got to after the browser: this device's database, then the
+// server. device, server and geolocations are what /api/device, /api/server and
+// /api/geolocations answered. Returns [[step, result]] and advice for any gap.
+function positionPath(device, server, geolocations) {
+  const rows = [];
+  const advice = [];
+  const sent = gpsDebug.last_sent;
+  rows.push(["sent to this app", sent ? `${formatPosition(sent.latitude, sent.longitude)} at ${formatTime(sent.time)}` +
+    ` (${gpsDebug.last_save})` : "nothing yet"]);
+  if (!device) {
+    rows.push(["saved in this device's database", "no: device not set up"]);
+    return { rows, advice };
+  }
+  const mine = geolocations.find((g) => g.user.toLowerCase() === device.name.toLowerCase());
+  rows.push(["saved in this device's database", mine
+    ? `${formatPosition(mine.latitude, mine.longitude)} at ${formatTime(mine.time_created)}` : "none"]);
+  if (sent && !mine) advice.push("A position was sent but isn't in the database: see 'sent to this app' above.");
+  if (!mine) return { rows, advice };
+
+  if (!server.url) {
+    rows.push(["sent to the server", `no: no server connected (looking for ${server.looking_for})`]);
+    advice.push("The position is saved on this device, but no server answers, so the server can't have it. " +
+                "Connect to the internet or the server's wifi; it's sent at the next sync.");
+  } else if (!server.last_server_sync || server.last_server_sync < mine.time_received) {
+    rows.push(["sent to the server", `not yet: connected to ${server.url}, last sync ` +
+      `${server.last_server_sync ? formatTime(server.last_server_sync) : "never"}`]);
+    advice.push("The position is saved but the server hasn't synced since. Refresh in a few seconds; if it stays " +
+                "this way, the terminal running main.py shows why the sync fails.");
+  } else {
+    rows.push(["sent to the server", `yes: synced with ${server.url} at ${formatTime(server.last_server_sync)}`]);
+  }
+  return { rows, advice };
+}
+
 async function sendLocation(pos) {
+  gpsDebug.last_sent = { time: Date.now() / 1000, latitude: pos.coords.latitude, longitude: pos.coords.longitude };
   const res = await fetch("/api/location", {
     method: "PUT",
     headers: { "content-type": "application/json" },
@@ -96,9 +140,13 @@ async function runGpsCheck(lastError) {
   findings.push(["page visible", document.visibilityState]);
 
   let device = "unknown";
+  let path = null;
   try {
     const res = await fetch("/api/device");
     device = res.ok ? "set up" : res.status === 409 ? "NOT set up" : `HTTP ${res.status}`;
+    const [server, geolocations] = await Promise.all(
+      ["/api/server", "/api/geolocations"].map((url) => fetch(url).then((r) => r.json())));
+    path = positionPath(res.ok ? await res.json() : null, server, geolocations);
   } catch (e) {
     device = `app not reachable (${e.message})`;
   }
@@ -108,8 +156,8 @@ async function runGpsCheck(lastError) {
   if (available && window.isSecureContext) {
     try {
       const pos = await getPosition(CHECK_OPTIONS);
-      anyPosition = `yes, ±${Math.round(pos.coords.accuracy)} m, ` +
-                    `${Math.round(Date.now() / 1000 - pos.timestamp / 1000)} s old`;
+      anyPosition = `yes: ${formatPosition(pos.coords.latitude, pos.coords.longitude)} ` +
+                    `±${Math.round(pos.coords.accuracy)} m, ${Math.round(Date.now() / 1000 - pos.timestamp / 1000)} s old`;
     } catch (err) {
       anyPosition = `no (${describeError(err)})`;
     }
@@ -139,6 +187,10 @@ async function runGpsCheck(lastError) {
   }
   if (device === "NOT set up") {
     advice.push("Positions are only saved once the device is set up: create it in the Debug tab.");
+  }
+  if (path) {
+    findings.push(...path.rows);
+    advice.push(...path.advice);
   }
   if (advice.length === 0) advice.push("Nothing obviously wrong; it tries again every minute.");
 
