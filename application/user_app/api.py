@@ -27,6 +27,8 @@ Global data (set by the company, loaded once from the server; users can't change
     GET    /api/global/categories           each category with its count
     GET    /api/global/trails               trails with their lines parsed from GPX
     GET    /api/global/trails/<id>.gpx      a trail's original GPX file
+    GET    /api/connection                  how fast a message can leave right now, for the Send
+                                            button: {state: fast | lora | none, via, detail}
     GET    /api/mesh                        the mesh radio: board, nearby devices, current sync,
                                             recent activity ({enabled: false} without --mesh-port)
     GET    /api/global/info                 {loaded_at, version}
@@ -275,6 +277,60 @@ def mesh_status():
         st["nearby"] = sum(1 for p in st["peers"] if p["last_heard"] and st["now"] - p["last_heard"] < NEARBY)
         out["node"] = st
     return jsonify(out)
+
+
+POSITION_FRESH = 300  # seconds: positions are shared about once a minute
+
+
+@api.get("/connection")
+def connection():
+    """How fast a message can leave this device right now (colours the Send button).
+
+    fast: connected to the server (Wi-Fi/internet), or a nearby device will be reached
+          over ESP-NOW (the Wi-Fi radio, ~60 m)
+    lora: nearby devices, but only over LoRa (long range, slow)
+    none: no server and nobody in radio range; messages wait until someone is
+    For a Heltec, the node picks ESP-NOW for an exchange when both devices' GPS
+    positions are within espnow_range; the same check is made here from the
+    positions in the database, so the button changes before anything is sent.
+    """
+    finder = current_app.config.get("SERVER")
+    current = finder.current if finder else None
+    if current:
+        return jsonify(state="fast", via="server", detail=f"connected to the server ({current[1]})")
+    mesh = current_app.config.get("MESH")
+    node = mesh["node"] if mesh else None
+    if node is None:
+        return jsonify(state="none", via=None, detail="no server, and the mesh radio is off")
+
+    from trailmesh.node import distance_m
+
+    st = node.status()
+    now = st["now"]
+    near = [p for p in st["peers"] if p["last_heard"] and now - p["last_heard"] < NEARBY]
+    if not near:
+        return jsonify(state="none", via=None, detail="no server, and nobody in radio range")
+
+    names = peer_names(db())
+    fresh = {g["user"].lower(): g for g in db().list("geolocations") if now - g["time_created"] < POSITION_FRESH}
+    device = db().get_device()
+    me = fresh.get(device["name"].lower()) if device else None
+    has_espnow = node.fast_link is not None or node.link.radio == "ESP-NOW"
+    session = st["session"]
+    for p in near:
+        name = names.get(p["id"], f"device {p['id']:08x}")
+        y = p["last_sync"]
+        if (p["heard_on"] == "ESP-NOW"
+                or (session and session["peer"] == p["id"] and session["radio"] == "ESP-NOW")
+                or (y and y["ok"] and y["radio"] == "ESP-NOW" and now - y["at"] < NEARBY)):
+            return jsonify(state="fast", via="ESP-NOW", detail=f"{name} is in ESP-NOW range")
+        them = fresh.get(name.lower())
+        if has_espnow and me and them:
+            d = distance_m((me["latitude"], me["longitude"]), (them["latitude"], them["longitude"]))
+            if d <= node.cfg.espnow_range:
+                return jsonify(state="fast", via="ESP-NOW", detail=f"{name} is {round(d)} m away (ESP-NOW)")
+    who = ", ".join(names.get(p["id"], f"device {p['id']:08x}") for p in near)
+    return jsonify(state="lora", via="LoRa", detail=f"{who} in LoRa range")
 
 
 @api.get("/contacts")

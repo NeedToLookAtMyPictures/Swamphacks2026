@@ -137,7 +137,8 @@ async function loadMessages() {
     list.replaceChildren(msgEl("p", "Set up this device first (Mesh tab).", "message-note"));
     return;
   }
-  myName = (await deviceRes.json()).name;
+  const device = await deviceRes.json();
+  myName = device.name;
 
   const [messages, contacts, gps, tombstones] = await Promise.all([
     fetch("/api/messages").then((r) => r.json()),
@@ -145,6 +146,8 @@ async function loadMessages() {
     fetch("/api/geolocations").then((r) => r.json()),
     fetch("/api/tombstones").then((r) => r.json()),
   ]);
+
+  await updateQueuedStatus(device, tombstones);
 
   // Redrawing resets the New chat dropdown and the scroll position, so skip it
   // when nothing changed since the last refresh
@@ -227,6 +230,7 @@ function render() {
 
 function openChat(who) {
   selected = who;
+  queued = null;  // the note belongs to the conversation it was sent in
   document.getElementById("compose-status").textContent = "";
   render();
 }
@@ -289,6 +293,33 @@ function startChat(name) {
   openChat(existing || name);
 }
 
+// The "Queued for ..." note under the box stays until the message has left this device:
+// delivered (its receipt came back), uploaded to the server, or handed to someone over
+// the mesh. Then it says so briefly and clears.
+let queued = null;  // {key, received, label} of the last message sent from this box
+
+async function updateQueuedStatus(device, tombstones) {
+  if (!queued) return;
+  const q = queued;
+  let how = null;
+  if (tombstones.some((t) => t.reason === "delivered" && `${t.target_origin_id}/${t.target_seq}` === q.key)) {
+    how = `Delivered to ${q.label}.`;
+  } else if (device.last_push && device.last_push >= q.received) {
+    how = "Sent (via the server).";
+  } else {
+    // A mesh exchange that finished after the message was written and sent something
+    const mesh = await fetch("/api/mesh").then((r) => r.json()).catch(() => null);
+    const peers = (mesh && mesh.node && mesh.node.peers) || [];
+    const hop = peers.find((p) => p.last_sync && p.last_sync.ok && p.last_sync.at >= q.received && p.last_sync.sent > 0);
+    if (hop) how = `Sent (passed to ${hop.name} over ${hop.last_sync.radio}).`;
+  }
+  if (!how || queued !== q) return;
+  queued = null;
+  const status = document.getElementById("compose-status");
+  status.textContent = how;
+  setTimeout(() => { if (status.textContent === how) status.textContent = ""; }, 3000);
+}
+
 document.getElementById("compose").addEventListener("submit", async (e) => {
   e.preventDefault();
   if (!selected) return;
@@ -302,6 +333,8 @@ document.getElementById("compose").addEventListener("submit", async (e) => {
     body: JSON.stringify({ receiver, content: content.value }),
   });
   if (res.ok) {
+    const m = await res.json();
+    queued = { key: `${m.origin_id}/${m.seq}`, received: m.time_received, label };
     status.textContent = `Queued for ${label}. It will be passed along as you meet people.`;
     content.value = "";
     loadMessages();
@@ -309,6 +342,29 @@ document.getElementById("compose").addEventListener("submit", async (e) => {
     status.textContent = (await res.json()).error;
   }
 });
+
+// The Send button's colour says how fast a message would leave right now (GET /api/connection):
+// blue = fast (the server, or a nearby device over ESP-NOW), green = LoRa only (slow),
+// grey = nothing in reach (it still sends: the message waits and spreads later).
+const CONNECTION_REFRESH_MS = 2000;
+const CONNECTION_TEXT = { fast: "fast connection", lora: "LoRa only (slower)", none: "nobody in reach yet" };
+
+async function updateSendButton() {
+  const c = await fetch("/api/connection").then((r) => r.json());
+  const button = document.getElementById("compose-send");
+  button.classList.remove("send-fast", "send-lora", "send-none");
+  button.classList.add(`send-${c.state}`);
+  const text = c.state === "none" ? `${c.detail}; the message waits and goes out once someone is` : c.detail;
+  button.title = `${CONNECTION_TEXT[c.state]}: ${text}`;
+  button.setAttribute("aria-label", `Send, ${CONNECTION_TEXT[c.state]}`);
+}
+
+updateSendButton().catch(() => {});
+setInterval(() => {
+  if (document.getElementById("messages").classList.contains("active") && !document.hidden) {
+    updateSendButton().catch(() => {});  // the local app is always reachable; try again next time
+  }
+}, CONNECTION_REFRESH_MS);
 
 // Pick up messages that arrive or get delivered in the background (sync, other devices)
 const MESSAGES_REFRESH_MS = 1000;
