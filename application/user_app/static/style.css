@@ -117,6 +117,11 @@ main {
 }
 
 .debug-form { display: flex; gap: 8px; }
+#debug .debug-kv { width: 100%; max-width: 720px; }
+#debug .debug-kv th, #debug .debug-kv td { white-space: normal; overflow-wrap: anywhere; }
+#debug .debug-kv th { width: 40%; }
+#gps-debug button { margin-top: 6px; }
+
 .debug-error { color: #b3261e; margin: 6px 0 0; }
 
 /* Messages tab: conversation sidebar on the left, open conversation on the right */

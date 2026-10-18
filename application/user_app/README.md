@@ -240,6 +240,10 @@ to locate themselves. Browsers only allow geolocation on `localhost` or HTTPS,
 so opening the app from another device over plain `http://<lan-ip>` won't report
 a position; start the server with `--https` for that (see Raspberry Pi above). Updates pause while the tab is hidden or the phone is locked.
 
+If the first try fails, the page checks why (secure page, permission, whether the
+phone has any position at all, device set up) and shows what to do in the Debug
+tab's `gps` section, which also has a **Run GPS check** button.
+
 ## Tabs
 
 - **Messages**: a sidebar with one conversation per person you've messaged with, with Everyone pinned to the top; click one to see its history and send to that person. The New chat dropdown lists everyone in your GPS data (newest first), or Other to type any name
