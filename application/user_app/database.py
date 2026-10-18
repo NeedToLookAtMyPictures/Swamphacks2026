@@ -25,10 +25,13 @@ TOMBSTONE_TTL = 2_678_400  # 31 days, in seconds
 # Each sync re-sends records from this long before the cursor, so a record written
 # while a sync was running isn't skipped. Merging is idempotent, so repeats are harmless.
 SYNC_OVERLAP = 60  # seconds
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 # Names are people's addresses: short (they go over LoRa) and compared ignoring case
 NAME_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
+# How a record reached this device (received_via), for the user only: never shared.
+# NULL means it was created here.
+VIA = ("server", "LoRa", "ESP-NOW", "sync API")
 # Receiver for messages to everyone. Not a valid name, so no person can have it.
 BROADCAST = "*"
 
@@ -42,6 +45,7 @@ CREATE TABLE IF NOT EXISTS locales (
     sender        TEXT    NOT NULL COLLATE NOCASE,  -- name
     comment       TEXT    NOT NULL DEFAULT '',
     time_received REAL    NOT NULL,
+    received_via  TEXT,              -- local only: see VIA
     PRIMARY KEY (origin_id, seq)
 );
 
@@ -55,6 +59,7 @@ CREATE TABLE IF NOT EXISTS messages (
     is_dead       INTEGER NOT NULL DEFAULT 0,  -- set by age or by a tombstone
     time_received REAL    NOT NULL,
     received      INTEGER NOT NULL DEFAULT 0,  -- local only: delivered tombstone came within 31 days
+    received_via  TEXT,              -- local only: see VIA
     PRIMARY KEY (origin_id, seq)
 );
 
@@ -66,7 +71,8 @@ CREATE TABLE IF NOT EXISTS geolocations (
     time_created  REAL    NOT NULL,
     latitude      REAL    NOT NULL,
     longitude     REAL    NOT NULL,
-    time_received REAL    NOT NULL
+    time_received REAL    NOT NULL,
+    received_via  TEXT               -- local only: see VIA
 );
 
 CREATE TABLE IF NOT EXISTS tombstones (
@@ -77,6 +83,7 @@ CREATE TABLE IF NOT EXISTS tombstones (
     time_created     REAL    NOT NULL,
     reason           TEXT    NOT NULL,
     time_received    REAL    NOT NULL,
+    received_via     TEXT,           -- local only: see VIA
     PRIMARY KEY (origin_id, seq)
 );
 
@@ -145,7 +152,7 @@ class Database:
         with self._connect() as conn:
             version = conn.execute("PRAGMA user_version").fetchone()[0]
             has_tables = conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table'").fetchone()
-            if has_tables and version in (2, 3, 4):
+            if has_tables and version in (2, 3, 4, 5):
                 self._add_missing_columns(conn)
             elif has_tables and version != SCHEMA_VERSION:
                 raise RuntimeError(f"{self.path} uses an old schema; delete it and restart")
@@ -154,13 +161,14 @@ class Database:
 
     @staticmethod
     def _add_missing_columns(conn):
-        """Upgrade schema 2 (no messages.received), 3 (no server sync cursors)
-        and 4 (no server_id)."""
+        """Upgrade schema 2 (no messages.received), 3 (no server sync cursors),
+        4 (no server_id) and 5 (no received_via)."""
         for table, column, definition in (
                 ("messages", "received", "INTEGER NOT NULL DEFAULT 0"),
                 ("device_info", "last_push", "REAL"),
                 ("device_info", "server_cursor", "REAL"),
-                ("device_info", "server_id", "TEXT")):
+                ("device_info", "server_id", "TEXT"),
+                *((t, "received_via", "TEXT") for t in SHARED_TABLES)):
             existing = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
             if column not in existing:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
@@ -364,6 +372,7 @@ class Database:
             for row in rows:
                 row.pop("time_received", None)  # local bookkeeping only
                 row.pop("received", None)
+                row.pop("received_via", None)
         return data
 
     def changes(self, cursor=None):
@@ -379,34 +388,37 @@ class Database:
 
     # -- merging records from other devices ----------------------------------------
 
-    def merge(self, data):
+    def merge(self, data, via=None):
         """Merge records received from another device or the server.
 
-        Returns how many records of each table were new or changed.
+        `via` is how they got here (one of VIA), stored in received_via for the
+        user to see. Returns how many records of each table were new or changed.
         """
+        if via is not None and via not in VIA:
+            raise ValueError(f"unknown via {via!r}")
         now = time.time()
         me = None if self.relay else self._require_device()["name"]
         counts = dict.fromkeys(SHARED_TABLES, 0)
         with self._connect() as conn:
             # Tombstones first, so they also kill messages arriving in this batch
             for record in data.get("tombstones", []):
-                record = self._clean("tombstones", record, now)
+                record = self._clean("tombstones", record, now, via)
                 if self._insert(conn, "tombstones", record, ignore=True):
                     counts["tombstones"] += 1
                 self._apply_tombstone(conn, record)
 
             for record in data.get("locales", []):
-                if self._insert(conn, "locales", self._clean("locales", record, now), ignore=True):
+                if self._insert(conn, "locales", self._clean("locales", record, now, via), ignore=True):
                     counts["locales"] += 1
 
             for record in data.get("messages", []):
-                record = self._clean("messages", record, now)
+                record = self._clean("messages", record, now, via)
                 if self._merge_message(conn, record, me):
                     counts["messages"] += 1
                 self._deliver_if_mine(conn, record, me)
 
             for record in data.get("geolocations", []):
-                if self._upsert_geolocation(conn, self._clean("geolocations", record, now)):
+                if self._upsert_geolocation(conn, self._clean("geolocations", record, now, via)):
                     counts["geolocations"] += 1
         self.purge()
         return counts
@@ -460,15 +472,16 @@ class Database:
         """Keep only the newest position per user; ties go to the higher device ID."""
         cur = conn.execute(
             "INSERT INTO geolocations (user, origin_id, time_created, latitude, longitude, "
-            "time_received) VALUES (:user, :origin_id, :time_created, :latitude, :longitude, "
-            ":time_received) "
+            "time_received, received_via) VALUES (:user, :origin_id, :time_created, :latitude, "
+            ":longitude, :time_received, :received_via) "
             "ON CONFLICT (user) DO UPDATE SET origin_id = excluded.origin_id, "
             "time_created = excluded.time_created, latitude = excluded.latitude, "
-            "longitude = excluded.longitude, time_received = excluded.time_received "
+            "longitude = excluded.longitude, time_received = excluded.time_received, "
+            "received_via = excluded.received_via "
             "WHERE excluded.time_created > geolocations.time_created "
             "OR (excluded.time_created = geolocations.time_created "
             "AND excluded.origin_id > geolocations.origin_id)",
-            record)
+            {"received_via": None, **record})
         return cur.rowcount > 0
 
     # -- housekeeping -------------------------------------------------------------
@@ -492,7 +505,7 @@ class Database:
     # -- helpers -------------------------------------------------------------------
 
     @staticmethod
-    def _clean(table, record, now):
+    def _clean(table, record, now, via=None):
         missing = [c for c in COLUMNS[table] if c not in OPTIONAL and record.get(c) is None]
         if missing:
             raise ValueError(f"{table} record is missing {', '.join(missing)}")
@@ -502,13 +515,14 @@ class Database:
         if table == "messages":
             clean["is_dead"] = int(bool(clean["is_dead"]))
         clean["time_received"] = now
+        clean["received_via"] = via
         return clean
 
     @staticmethod
     def _insert(conn, table, record, ignore=False):
-        cols = COLUMNS[table]
+        cols = (*COLUMNS[table], "received_via")
         verb = "INSERT OR IGNORE" if ignore else "INSERT"
         cur = conn.execute(
             f"{verb} INTO {table} ({', '.join(cols)}) VALUES ({', '.join(':' + c for c in cols)})",
-            record)
+            {"received_via": None, **record})
         return cur.rowcount > 0

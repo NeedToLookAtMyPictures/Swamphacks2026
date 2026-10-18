@@ -112,7 +112,7 @@ def ensure_certificate():
     print(f"Created a self-signed certificate in {DATA_DIR} for {', '.join(names + ips)}")
 
 
-def start_mesh(db, serial_port, demo, board_kind="espnow", radio="auto"):
+def start_mesh(db, serial_port, demo, board_kind="espnow", radio="auto", multiple_boards=False):
     """Run a mesh node on this app's database in a background thread.
 
     The board is opened right away, here on the main thread: on Android that
@@ -129,6 +129,8 @@ def start_mesh(db, serial_port, demo, board_kind="espnow", radio="auto"):
     def mesh_log(*msg):
         print("[mesh]", *msg, flush=True)
 
+    if multiple_boards and radio == "lora":
+        sys.exit("--multiple-boards needs --mesh-radio auto: radio lora never turns ESP-NOW on")
     try:
         board = open_board(board_kind, serial_port, log=mesh_log)
     except TransportError as e:
@@ -139,7 +141,7 @@ def start_mesh(db, serial_port, demo, board_kind="espnow", radio="auto"):
         while db.get_device() is None:
             time.sleep(1)
         node = build_node(
-            board, AppStore(db), radio=radio, config=dict(always_on=demo),
+            board, AppStore(db), radio=radio, config=dict(always_on=demo), multiple_boards=multiple_boards,
             on_record=lambda r: mesh_log(f"received {r.kind.name.lower()} from the mesh"),
             on_delivered=lambda origin, seq: mesh_log(f"message {origin}/{seq} was delivered"),
             on_session_end=lambda s: mesh_log(
@@ -181,7 +183,8 @@ def run(args):
     if args.mesh_port:
         if args.debug:
             sys.exit("--mesh-port can't be combined with --debug (the reloader would open the board twice)")
-        start_mesh(app.config["DATABASE"], args.mesh_port, args.mesh_demo, args.mesh_board, args.mesh_radio)
+        start_mesh(app.config["DATABASE"], args.mesh_port, args.mesh_demo, args.mesh_board, args.mesh_radio,
+                   args.multiple_boards)
     finder = server_sync.ServerFinder(args.server, lan=not args.no_lan)
     app.config["SERVER"] = finder
     # With --debug the reloader runs this twice; only sync from the process that serves
@@ -224,6 +227,9 @@ def main():
                         help="espnow: an ESP32 with espnow_bridge; heltec: a Heltec LoRa 32 V3 with heltec_bridge")
     parser.add_argument("--mesh-radio", choices=("auto", "lora", "espnow"), default="auto",
                         help="heltec only. auto: LoRa, switching to ESP-NOW within 60 m; lora / espnow: that radio only")
+    parser.add_argument("--multiple-boards", action="store_true",
+                        help="heltec, mesh radio auto: also sync with plain ESP32s (espnow_bridge) over ESP-NOW "
+                             "whenever LoRa isn't producing syncs")
     run(parser.parse_args())
 
 

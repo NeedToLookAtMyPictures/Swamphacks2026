@@ -237,7 +237,7 @@ def merge():
     unknown = data.keys() - set(SHARED_TABLES)
     if unknown:
         raise ValueError(f"unknown tables: {', '.join(sorted(unknown))}")
-    return jsonify(merged=db().merge(data))
+    return jsonify(merged=db().merge(data, via="sync API"))
 
 
 # -- global data -------------------------------------------------------------------------

@@ -41,6 +41,7 @@ class LoRaLink(Link):
     """The board's LoRa radio. Created by HeltecSerialLink; shares its serial port."""
 
     mtu = 250  # the SX1262 carries up to 255 bytes; trailmesh frames stop at 250
+    radio = "LoRa"
 
     def __init__(self, board: HeltecSerialLink):
         self._board = board

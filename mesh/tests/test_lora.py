@@ -195,9 +195,14 @@ class RadioSwitchTests(unittest.TestCase):
         self.assertIsNotNone(got())
         return self.ends[0]
 
+    def received_via(self):
+        a, b = self.nodes
+        return b.store.db.list("locales")[0]["received_via"]
+
     def test_close_peers_exchange_over_espnow(self):
         s = self.sync((29.650000, -82.320000), (29.650200, -82.320000))  # ~22 m apart
         self.assertTrue(s.fast)
+        self.assertEqual(self.received_via(), "ESP-NOW")
         self.assertGreater(len(self.espnow_frames), 5)
         run(self.nodes, self.clock, 5)  # past the finished session's linger
         self.assertFalse(any(n.fast_link.radio_on for n in self.nodes), "ESP-NOW is off again afterwards")
@@ -205,9 +210,96 @@ class RadioSwitchTests(unittest.TestCase):
     def test_distant_peers_stay_on_lora(self):
         s = self.sync((29.650000, -82.320000), (29.660000, -82.320000))  # ~1.1 km apart
         self.assertFalse(s.fast)
+        self.assertEqual(self.received_via(), "LoRa")
         self.assertEqual(self.espnow_frames, [])
         a, b = self.nodes
         self.assertEqual(b.store.db.get_location("alice")["latitude"], 29.65, "positions travel over LoRa too")
+
+
+@unittest.skipIf(database is None, "the app's database.py isn't available (no checkout or git main)")
+class MultipleBoardsTests(unittest.TestCase):
+    """espnow_fallback (--multiple-boards): Heltecs (LoRa + ESP-NOW) and plain ESP32s (ESP-NOW only) together."""
+
+    def setUp(self):
+        self.clock = SimClock()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.dir = tmp.name
+        self.p = LoRaParams()
+        self.lora, self.espnow = SimMedium(self.clock, airtime=self.p.airtime), SimMedium(self.clock)
+        self.ends = []
+
+    def heltec(self, name, dev_id, fallback=True, always_on=True):
+        return Node(self.lora.link(name), AppStore(new_db(self.dir, name, f"{dev_id:08x}")),
+                    Config.lora(self.p, always_on=always_on, espnow_fallback=fallback), clock=self.clock,
+                    rng=random.Random(dev_id), fast_link=self.espnow.link(name),
+                    fast_config=Config(idle_timeout=6.0, max_retries=20), on_session_end=self.ends.append)
+
+    def plain(self, name, dev_id, always_on=True):
+        return Node(self.espnow.link(name), AppStore(new_db(self.dir, name, f"{dev_id:08x}")),
+                    Config(always_on=always_on), clock=self.clock, rng=random.Random(dev_id),
+                    on_session_end=self.ends.append)
+
+    def send_locale(self, src, dst, nodes, seconds=60):
+        loc = src.store.db.add_locale("spring-1203", "Mile 1203 spring", "w" * 2000)
+        got = lambda: dst.store.db.get("locales", loc["origin_id"], loc["seq"])  # noqa: E731
+        run(nodes, self.clock, seconds, until=lambda: got() and all(n.session is None for n in nodes))
+        return got()
+
+    def test_heltec_and_plain_esp32_sync_either_way_round(self):
+        for heltec_id, plain_id in ((1, 2), (2, 1)):  # the lower id starts the handshake
+            with self.subTest(heltec_id=heltec_id):
+                self.setUp()
+                h, e = self.heltec(f"h{heltec_id}", heltec_id), self.plain(f"e{plain_id}", plain_id)
+                self.assertIsNotNone(self.send_locale(e, h, [h, e]))
+                self.assertIsNotNone(self.send_locale(h, e, [h, e]))
+                mine = [s for s in self.ends if s.my_id == h.id]
+                self.assertTrue(mine and all(s.fast and s.espnow_only and s.ok for s in mine))
+                self.assertEqual({r["received_via"] for r in h.store.db.list("locales")}, {None, "ESP-NOW"})
+
+    def test_without_the_flag_they_never_sync(self):
+        h, e = self.heltec("h", 1, fallback=False), self.plain("e", 2)
+        self.assertIsNone(self.send_locale(e, h, [h, e], seconds=30))
+        self.assertEqual(self.ends, [])
+
+    def test_duty_cycled_windows_line_up(self):
+        h, e = self.heltec("h", 1, always_on=False), self.plain("e", 2, always_on=False)
+        self.assertIsNotNone(self.send_locale(e, h, [h, e], seconds=120))
+
+    def test_heltecs_keep_the_60m_switch(self):
+        for b_pos, fast in (((29.650200, -82.32), True), ((29.660000, -82.32), False)):  # ~22 m, ~1.1 km
+            with self.subTest(fast=fast):
+                self.setUp()
+                a, b = self.heltec("alice", 1), self.heltec("bob", 2)
+                a.store.db.set_location(29.65, -82.32)
+                b.store.db.set_location(*b_pos)
+                self.assertIsNotNone(self.send_locale(a, b, [a, b]))
+                s = self.ends[0]
+                self.assertTrue(s.ok)
+                self.assertFalse(s.espnow_only, "found over LoRa, so the handshake went over LoRa")
+                self.assertEqual(s.fast, fast)
+
+    def test_espnow_is_tried_when_lora_fails(self):
+        a, b = self.heltec("alice", 1), self.heltec("bob", 2)
+        self.lora.in_range = lambda x, y: False  # LoRa is broken between them; ESP-NOW still works
+        self.assertIsNotNone(self.send_locale(a, b, [a, b]))
+        self.assertTrue(self.ends[-1].espnow_only)
+
+    def test_espnow_is_tried_after_a_failed_lora_exchange(self):
+        a, b = self.heltec("alice", 1), self.heltec("bob", 2)
+        for n in (a, b):  # beacons get through on LoRa, nothing else does
+            send = n.link.send
+            n.link.send = lambda p, *x, _s=send: Frame.decode(p).type is T.BEACON and _s(p, *x)
+        self.assertIsNotNone(self.send_locale(a, b, [a, b], seconds=120))
+        mine = [s for s in self.ends if s.my_id == a.id]
+        self.assertFalse(mine[0].ok or mine[0].espnow_only, "first try: LoRa, which fails")
+        self.assertTrue(mine[-1].ok and mine[-1].espnow_only, "then ESP-NOW")
+
+    def test_plain_esp32_data_reaches_a_lora_only_peer(self):
+        """A plain ESP32 near one Heltec; a second Heltec only that one can reach, over LoRa."""
+        a, b, e = self.heltec("alice", 1), self.heltec("bob", 2), self.plain("eve", 3)
+        self.espnow.in_range = lambda x, y: b"bob" not in (x, y)  # bob is miles away
+        self.assertIsNotNone(self.send_locale(e, b, [a, b, e], seconds=120))
 
 
 @unittest.skipIf(HeltecSerialLink is None, "pyserial not installed")

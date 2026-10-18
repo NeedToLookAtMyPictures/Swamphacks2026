@@ -93,6 +93,8 @@ class Session:
         self.hello_info = hello_info  # (lat * 1e7, lon * 1e7, HELLO_* flags) for our HELLO / HELLO_ACK
         self.peer_position: tuple[float, float] | None = None  # from the peer's HELLO / HELLO_ACK
         self.fast = False  # set by the Node: after the handshake, frames go over ESP-NOW
+        self.espnow_only = False  # set by the Node: the handshake went over ESP-NOW too (espnow_fallback)
+        self.radios = ("ESP-NOW", "ESP-NOW")  # set by the Node: Link.radio of (link, fast_link)
         self._ack_first: float | None = None  # first reliable frame not yet acked (delayed ACKs)
         self._ack_last = 0.0
 
@@ -210,7 +212,7 @@ class Session:
                     return  # malformed; drop it
                 if rec.id != rid:
                     return  # not the record we asked for; drop it
-                if self.store.put(rec):
+                if self.store.put(rec, via=self.radio):
                     self.records_received += 1
                     if self._on_record:
                         self._on_record(rec)
@@ -294,6 +296,11 @@ class Session:
         self.sender = ReliableSender(config.window_frames, config.rto, config.max_retries)
 
     # Timers -----------------------------------------------------------------
+
+    @property
+    def radio(self) -> str:
+        """The radio the exchange runs on (Link.radio), e.g. "LoRa" or "ESP-NOW"."""
+        return self.radios[1] if self.fast else self.radios[0]
 
     def tick(self, now: float) -> None:
         if self.finished:

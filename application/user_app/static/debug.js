@@ -14,6 +14,8 @@ function el(tag, text, className) {
 }
 
 function formatValue(key, value) {
+  // received_via: how the row got here (server, LoRa, ESP-NOW, sync API); never shared
+  if (key === "received_via") return value || "this device";
   if (value === null || value === undefined) return "—";
   if (TIME_FIELDS.has(key) && typeof value === "number") {
     return new Date(value * 1000).toLocaleString();

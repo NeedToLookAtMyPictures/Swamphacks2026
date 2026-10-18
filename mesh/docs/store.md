@@ -68,6 +68,11 @@ cutoff is 2 days ago. Both got everything older from the server. After that:
 stored (from a peer, the server, or written on this device). `export()`
 doesn't include it, so `AppStore` reads it with `list()`.
 
+`put()` also tells the app which radio a row came over (`Link.radio`: "LoRa"
+or "ESP-NOW"). The app stores it in the local `received_via` column, next to
+"server" and "sync API" for its other ways in. Rows made on this device have
+none. It's shown in the Debug tab only and never shared.
+
 **This differs from the app's own `GET /api/sync?since=`**, which filters on
 `time_created` only. The mesh doesn't use that endpoint, but anything else that
 does (such as device-to-server sync) still has the old behavior.
