@@ -144,11 +144,12 @@ missing records the new server never got.
 The server keeps the master copy of the global data: the water sources,
 campsites and trails everyone sees on the map. It lives in `data/global.db`, next
 to `server.db`. On first start it's filled from
-`../user_app/sample_global_locales.json` and `../user_app/sample_trails/`: the
+`global/global_data.json`, with the trails' GPX files in `global/trails/`: the
 Gainesville-Hawthorne Trail and the John Muir Trail (`GLOBAL_SEED` picks
-another file). A server started before a trail was added there keeps its old
-copy; load the file again to get it:
-`python server.py --load-global ../user_app/sample_global_locales.json`. Each copy has a `version`, a hash of its
+another file). To add a trail, put its GPX in `global/trails/` and add an entry
+for it to `global_data.json`. A server that has already started keeps its old
+copy; load the file again to update it (devices get it on their next sync):
+`python server.py --load-global global/global_data.json`. Each copy has a `version`, a hash of its
 content; devices send theirs with every sync, and the server includes its data
 in the reply only when the versions differ. So a new device gets it on its first
 sync, and an update reaches every device on its next sync, over the internet or
@@ -179,14 +180,16 @@ To change it, download a new one with `download_map.py` (needs internet), copy
 it into `map/` and restart the server:
 
 ```bash
-python download_map.py --gpx ../user_app/sample_trails/John_Muir_Trail.gpx   # around a trail
-python download_map.py --place "Ocala, Florida"                               # or a place / --bbox
+python download_map.py --trail trail-john-muir   # around one of the server's trails
+python download_map.py --gpx some_trail.gpx       # or a GPX file, a --place or a --bbox
 cp downloads/john-muir-trail/map.* map/
 ```
 
 It saves `map.pmtiles` and `map.json` in `downloads/<name>/` (git-ignored), so
 you can check the size first; `--out map` writes straight into `map/`. With
-`--gpx` the map covers the trail plus `--margin-km` (5). Up to `--full-zoom`
+`--trail` (an id from `global_data.json`: the trail is read from the server's
+`data/global.db`, or from `global_data.json` if the server hasn't started yet)
+or `--gpx` the map covers the trail plus `--margin-km` (5). Up to `--full-zoom`
 (11) it has the whole area; above that only tiles within `--corridor-km` (3) of
 the trail, so a long trail stays small (the John Muir Trail is about 4,100
 tiles instead of 27,000). The server has one map at a time, for every device.

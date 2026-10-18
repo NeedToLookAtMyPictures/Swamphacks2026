@@ -12,7 +12,7 @@ Usage:
     python server.py                     # development, http://127.0.0.1:8000
     python server.py --host 0.0.0.0      # development, reachable (and discoverable) on the wifi
     python server.py --load-global FILE  # replace the global data (devices get it on next sync)
-    python download_map.py --gpx TRAIL.gpx   # download map tiles around a trail, for map/
+    python download_map.py --trail ID        # download map tiles around a trail, for map/
 
 Open the server's address in a browser to see everything in its database.
 
@@ -57,10 +57,9 @@ DB_PATH = Path(os.environ.get("SERVER_DB", HERE / "data" / "server.db"))
 # The public URL is https://heuslerene.com/server, and the tunnel passes the path
 # on unchanged. Requests work with or without it, so the wifi address still works.
 URL_PREFIX = os.environ.get("URL_PREFIX", "/server").rstrip("/")
-# Loaded into an empty global database on first start: the user app's sample
-# water sources and campsites, and the Gainesville-Hawthorne trail
-GLOBAL_SEED = Path(os.environ.get("GLOBAL_SEED",
-                                  HERE.parent / "user_app" / "sample_global_locales.json"))
+# Loaded into an empty global database on first start: the sample water sources
+# and campsites, and the trails' GPX files in global/trails/
+GLOBAL_SEED = Path(os.environ.get("GLOBAL_SEED", HERE / "global" / "global_data.json"))
 # The offline map devices get: map.pmtiles (Protomaps vector tiles) and map.json
 # (its name, bounds and zoom levels, as written by user_app/download_locales.py)
 MAP_DIR = Path(os.environ.get("MAP_DIR", HERE / "map"))
@@ -308,7 +307,7 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--load-global", type=Path, metavar="FILE",
                         help="replace the global data with a JSON file (format: "
-                             "user_app/sample_global_locales.json) and exit")
+                             "global/global_data.json) and exit")
     args = parser.parse_args()
     if args.load_global:
         print(app.config["SERVER"].global_db.load(read_load_file(args.load_global)))
