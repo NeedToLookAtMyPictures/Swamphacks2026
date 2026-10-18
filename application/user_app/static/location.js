@@ -7,7 +7,7 @@
 // on another device (e.g. a Raspberry Pi over Bluetooth), start it with --https.
 //
 // If the first try fails, runGpsCheck() works out why. Its findings show in the
-// Debug tab's gps section (gpsDebug).
+// Mesh tab's gps section (gpsDebug).
 
 const LOCATION_INTERVAL_MS = 60 * 1000;
 const LOCATION_OPTIONS = {
@@ -20,7 +20,7 @@ const CHECK_OPTIONS = { enableHighAccuracy: false, timeout: 15 * 1000, maximumAg
 
 const GEO_ERRORS = { 1: "PERMISSION_DENIED", 2: "POSITION_UNAVAILABLE", 3: "TIMEOUT" };
 
-// Read by the Debug tab
+// Read by the Mesh tab
 const gpsDebug = {
   attempts: 0,
   fixes: 0,
@@ -82,7 +82,7 @@ async function sendLocation(pos) {
   });
   // 409 means the device has no identity yet; try again next minute
   gpsDebug.last_save = res.ok ? "saved"
-    : res.status === 409 ? "not saved: device not set up yet (Debug tab)" : `failed: HTTP ${res.status}`;
+    : res.status === 409 ? "not saved: device not set up yet (Mesh tab)" : `failed: HTTP ${res.status}`;
   if (!res.ok && res.status !== 409) console.warn("location update failed:", res.status);
 }
 
@@ -186,7 +186,7 @@ async function runGpsCheck(lastError) {
     advice.push("Keep this page open on screen: the browser pauses location while the tab is hidden or the phone is locked.");
   }
   if (device === "NOT set up") {
-    advice.push("Positions are only saved once the device is set up: create it in the Debug tab.");
+    advice.push("Positions are only saved once the device is set up: create it in the Mesh tab.");
   }
   if (path) {
     findings.push(...path.rows);

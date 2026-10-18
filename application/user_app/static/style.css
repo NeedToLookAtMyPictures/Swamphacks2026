@@ -27,6 +27,24 @@ body {
   cursor: pointer;
 }
 
+/* App logo at the left end of the tab bar, on every tab. It sits inside the Messages
+   tab button, so the background behind it is that tab's, selected or not. */
+.tab[data-tab="messages"] { position: relative; }
+.app-logo {
+  position: absolute;
+  /* the same 2px gap on the left, top and bottom; square, as tall as the tab allows */
+  top: 2px;
+  bottom: 2px;
+  left: 2px;
+  height: calc(100% - 4px);
+  aspect-ratio: 1;
+  pointer-events: none;  /* clicks go to the Messages tab */
+}
+/* Narrow screens: keep the centred "Messages" text clear of the logo */
+@media (max-width: 600px) {
+  .tab[data-tab="messages"] { padding-left: 54px; }
+}
+
 .tab.active {
   color: #fff;
   background: #2e5a43;
@@ -105,7 +123,7 @@ main {
 .explore-card-detail { font-size: 14px; color: #666; }
 .explore-card-action { margin-top: 6px; font-size: 13px; font-weight: 600; color: #2e5a43; }
 
-/* Debug tab */
+/* Mesh tab (panel id "debug") */
 #debug {
   overflow: auto;
   padding: 12px 16px;
@@ -471,6 +489,22 @@ main {
 
 .debug-db-title { margin: 28px 0 0; font-size: 17px; }
 
+/* "debug" toggle: looks like a section title (.debug-section h3), but clickable */
+.debug-toggle {
+  display: block;
+  margin: 22px 0 6px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: bold 15px ui-monospace, monospace;
+  cursor: pointer;
+}
+.debug-toggle:hover { color: #2e5a43; }
+.debug-toggle:focus-visible { outline: 2px solid #2e5a43; outline-offset: 2px; }
+.debug-toggle-caret { display: inline-block; width: 1.2em; color: #2e5a43; }
+.debug-toggle-count { font-weight: normal; color: #888; }
+
 /* Locale sheet: the bottom half of the Map tab when a locale is clicked */
 #locale-sheet {
   flex: 0 0 50%;
@@ -580,52 +614,19 @@ main {
 .locale-comment-body { margin-top: 4px; white-space: pre-wrap; }
 .locale-note { color: #888; font-size: 14px; margin: 4px 0; }
 
-/* Mesh status at the top of the Debug tab, and its badge on the tab button (mesh.js) */
-.mesh-badge {
-  display: inline-block;
-  margin-left: 6px;
-  padding: 1px 8px;
-  border-radius: 10px;
-  font-size: 12px;
-  background: #4a5d53;
-  color: #e6efe9;
-}
-.mesh-badge::before { content: "●"; margin-right: 4px; }
-.mesh-badge.ok::before { color: #6fe39a; }
-.mesh-badge.syncing::before { color: #ffd166; animation: mesh-pulse 0.8s infinite alternate; }
-.mesh-badge.idle::before { color: #b8c7bf; }
-.mesh-badge.error::before { color: #ff7b72; }
-.mesh-badge.off::before { color: #7d8c84; }
-@keyframes mesh-pulse { from { opacity: 1; } to { opacity: 0.3; } }
+/* Mesh status at the top of the Mesh tab (mesh.js) */
 
-#mesh-status { margin-bottom: 4px; }
-.mesh-card {
-  background: #fff;
-  border-radius: 8px;
-  padding: 12px 14px;
-  margin: 0 0 12px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
-}
-.mesh-card h3 { margin: 0 0 8px; font-size: 16px; color: #1f3b2d; }
-.mesh-note { color: #777; font-size: 13px; font-weight: normal; margin: 2px 0; }
-.mesh-kv { display: flex; gap: 10px; font-size: 14px; padding: 2px 0; }
-.mesh-k { flex: 0 0 90px; color: #666; }
-.mesh-v { flex: 1; overflow-wrap: anywhere; }
+#mesh-status .debug-section:first-child h3 { margin-top: 4px; }
+#mesh-status { margin-bottom: 18px; }
+#debug tr.stale td { color: #999; }  /* hikers not heard in the last minute */
 .mesh-syncing {
+  margin: 0 0 6px;
+  padding: 4px 8px;
   background: #fff6d6;
-  border-left: 3px solid #e0a800;
-  padding: 6px 10px;
-  margin-bottom: 8px;
-  font-size: 14px;
+  border: 1px solid #e8d48a;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
 }
-.mesh-peer { padding: 6px 0; border-top: 1px solid #eee; }
-.mesh-peer:first-child { border-top: none; }
-.mesh-peer.stale { opacity: 0.55; }
-.mesh-peer-head { display: flex; justify-content: space-between; gap: 8px; }
-.mesh-signal { font-family: ui-monospace, monospace; font-size: 13px; color: #2e5a43; }
-.mesh-event { display: flex; gap: 10px; font-size: 14px; padding: 3px 0; border-top: 1px solid #f0f0f0; }
-.mesh-event:first-child { border-top: none; }
-.mesh-event-time { flex: 0 0 80px; color: #888; }
 
 /* How a record reached this device (arrivalNote in mesh.js) */
 .via-note { font-size: 12px; margin-top: 4px; color: #555; }
@@ -669,3 +670,27 @@ main {
 .message-info dd { overflow-wrap: anywhere; }
 .message-info dt { color: #777; }
 .message-info dd { margin: 0; }
+
+/* Map pins for water and campsites: coloured circle with a white icon cut out (global-locales.js) */
+.locale-pin-wrap { background: none; border: none; }
+.locale-pin {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  border-radius: 50%;
+  background: var(--pin);
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+}
+.locale-pin.selected { border: 3px solid #222; }
+.locale-pin-icon {
+  width: 66%;
+  height: 66%;
+  background: #fff;
+  -webkit-mask: var(--icon) center / contain no-repeat;
+  mask: var(--icon) center / contain no-repeat;
+}

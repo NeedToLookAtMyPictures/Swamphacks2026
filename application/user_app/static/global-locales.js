@@ -19,6 +19,25 @@ function categoryColor(category) {
   return EXTRA_COLORS[hash % EXTRA_COLORS.length];
 }
 
+// Categories drawn as a pin with a white icon cut out of the coloured circle
+// (static/icons/*.svg, Ionicons, MIT). Others are plain coloured circles.
+const CATEGORY_ICONS = { water: "water-outline", campsite: "bonfire-outline" };
+
+function iconMarker(l, color, selected) {
+  const size = selected ? 30 : 24;
+  const html = `<span class="locale-pin${selected ? " selected" : ""}" style="--pin:${color}">` +
+    `<span class="locale-pin-icon" style="--icon:url('/static/icons/${CATEGORY_ICONS[l.category]}.svg')"></span></span>`;
+  const marker = L.marker([l.latitude, l.longitude], {
+    icon: L.divIcon({ className: "locale-pin-wrap", html, iconSize: [size, size], iconAnchor: [size / 2, size / 2] }),
+    zIndexOffset: selected ? 1000 : 0,
+    title: "",
+  }).bindTooltip(l.name, { direction: "top", offset: [0, -size / 2] });
+  // Hovered pin on top, like bringToFront() on the plain circles
+  marker.on("mouseover", () => marker.setZIndexOffset(2000));
+  marker.on("mouseout", () => marker.setZIndexOffset(selected ? 1000 : 0));
+  return marker;
+}
+
 function categoryLabel(category) {
   return category.charAt(0).toUpperCase() + category.slice(1);
 }
@@ -38,16 +57,17 @@ function drawGlobalLocales() {
     .map((l) => {
       const color = categoryColor(l.category);
       const selected = sheetLocale && sheetLocale.id === l.id;
-      const marker = L.circleMarker([l.latitude, l.longitude], {
+      const iconed = Boolean(CATEGORY_ICONS[l.category]);
+      const marker = iconed ? iconMarker(l, color, selected) : L.circleMarker([l.latitude, l.longitude], {
         radius: selected ? 11 : 8, color: selected ? "#222" : "#fff", weight: selected ? 3 : 2,
         fillColor: color, fillOpacity: 1,
       }).bindTooltip(l.name, { direction: "top", offset: [0, -8] });
-      marker.on("mouseover", () => marker.bringToFront());
+      if (!iconed) marker.on("mouseover", () => marker.bringToFront());
       marker.on("click", (e) => {
         L.DomEvent.stopPropagation(e);  // a map click closes the sheet
         openLocaleSheet(l);
       });
-      if (selected) setTimeout(() => marker.bringToFront());
+      if (selected && !iconed) setTimeout(() => marker.bringToFront());
       return marker;
     })).addTo(map);
 }

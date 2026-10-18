@@ -4,15 +4,16 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>User App</title>
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/miriad-logo.svg') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='vendor/leaflet/leaflet.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
   <nav class="tabs">
-    <button class="tab active" data-tab="messages">Messages</button>
+    <button class="tab active" data-tab="messages"><img class="app-logo" src="{{ url_for('static', filename='img/miriad-logo.svg') }}" alt="">Messages</button>
     <button class="tab" data-tab="map">Map</button>
     <button class="tab" data-tab="explore">Explore</button>
-    <button class="tab" data-tab="debug">Debug <span id="mesh-badge" class="mesh-badge off" title="Mesh radio"></span></button>
+    <button class="tab" data-tab="debug">Mesh</button>
   </nav>
 
   <main>
@@ -70,7 +71,7 @@
               <button>Post</button>
             </div>
           </form>
-          <p id="locale-comment-setup" class="locale-note" hidden>Set up this device (Debug tab) to add comments.</p>
+          <p id="locale-comment-setup" class="locale-note" hidden>Set up this device (Mesh tab) to add comments.</p>
           <div id="locale-comments"></div>
         </div>
       </div>
@@ -108,30 +109,29 @@
 
     <section id="debug" class="panel">
       <div id="mesh-status">
-        <div id="mesh-off" class="mesh-card" hidden>
-          <h3>Mesh radio is off</h3>
-          <p class="mesh-note">This app was started without a board. Start it with
-            <code>--mesh-port</code> (and <code>--mesh-board heltec</code> for LoRa) to sync with
-            nearby hikers without internet.</p>
+        <div id="mesh-off" class="debug-section" hidden>
+          <h3>mesh_radio</h3>
+          <p class="debug-empty">Off: this app was started without a board. Start it with <code>--mesh-port</code>
+            (and <code>--mesh-board heltec</code> for LoRa) to sync with nearby hikers without internet.</p>
         </div>
         <div id="mesh-on" hidden>
-          <div class="mesh-card">
-            <h3>This device</h3>
-            <div id="mesh-board"></div>
+          <div class="debug-section">
+            <h3>this_device</h3>
+            <div class="debug-table-wrap"><table id="mesh-board"></table></div>
           </div>
-          <div class="mesh-card">
-            <h3>Nearby <span id="mesh-nearby-count" class="mesh-note"></span></h3>
-            <div id="mesh-session"></div>
+          <div class="debug-section">
+            <h3 id="mesh-nearby-title">nearby</h3>
+            <p id="mesh-session" class="mesh-syncing" hidden></p>
             <div id="mesh-peers"></div>
           </div>
-          <div class="mesh-card">
-            <h3>Recent activity</h3>
+          <div class="debug-section">
+            <h3 id="mesh-events-title">recent_activity</h3>
             <div id="mesh-events"></div>
           </div>
         </div>
       </div>
       <div class="debug-toolbar">
-        <strong>Local database</strong>
+        <strong>local_database</strong>
         <button id="debug-refresh">Refresh</button>
         <span id="debug-status"></span>
       </div>

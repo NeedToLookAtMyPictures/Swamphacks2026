@@ -1,4 +1,4 @@
-// Debug tab: shows everything in the local database via the /api endpoints.
+// Mesh tab (panel id "debug"): shows everything in the local database via the /api endpoints.
 
 const DEBUG_TABLES = ["messages", "locales", "geolocations", "tombstones"];
 const GLOBAL_DEBUG_TABLES = { global_locales: "/api/global/locales",
@@ -135,6 +135,50 @@ function renderDeviceSetup(content, server) {
   content.appendChild(section);
 }
 
+// A single record (device_info, server) as two columns: field names in header cells
+// down the left and values beside them, like the this_device table above.
+function renderRecord(title, record) {
+  const section = el("div", undefined, "debug-section");
+  section.appendChild(el("h3", title));
+  const table = el("table");
+  const body = table.createTBody();
+  Object.entries(record).forEach(([key, value]) => {
+    const tr = body.insertRow();
+    tr.append(el("th", key), el("td", formatValue(key, value)));
+  });
+  const wrap = el("div", undefined, "debug-table-wrap");
+  wrap.appendChild(table);
+  section.appendChild(wrap);
+  return section;
+}
+
+// "debug": a heading-style toggle that shows or hides the raw tables below it.
+// Hidden by default; the choice is remembered per browser (like the chats sidebar).
+const DEBUG_SHOWN_KEY = "debugTablesShown";
+
+function debugShown() {
+  try { return localStorage.getItem(DEBUG_SHOWN_KEY) === "1"; } catch { return false; }
+}
+
+function debugToggle(extra, count) {
+  const button = el("button", undefined, "debug-toggle");
+  button.type = "button";
+  button.setAttribute("aria-controls", "debug-extra");
+  const show = (open) => {
+    extra.hidden = !open;
+    button.setAttribute("aria-expanded", String(open));
+    button.replaceChildren(el("span", open ? "▾ " : "▸ ", "debug-toggle-caret"), "debug",
+                           el("span", open ? "" : ` (${count} tables)`, "debug-toggle-count"));
+  };
+  show(debugShown());
+  button.addEventListener("click", () => {
+    const open = extra.hidden;
+    try { localStorage.setItem(DEBUG_SHOWN_KEY, open ? "1" : ""); } catch {}
+    show(open);
+  });
+  return button;
+}
+
 async function loadDebug() {
   const content = document.getElementById("debug-content");
   const status = document.getElementById("debug-status");
@@ -151,23 +195,28 @@ async function loadDebug() {
     const device = deviceRes.ok ? await deviceRes.json() : null;
     gpsPath = positionPath(device, server, tables[DEBUG_TABLES.indexOf("geolocations")]);
     if (device) {
-      content.appendChild(renderTable("device_info", [device]));
+      content.appendChild(renderRecord("device_info", device));
     } else {
       renderDeviceSetup(content, server);
     }
-    content.appendChild(renderTable("server", [server]));
-    DEBUG_TABLES.forEach((t, i) => content.appendChild(renderTable(t, tables[i])));
-    content.appendChild(el("h2", "Global database (from the server, read-only)", "debug-db-title"));
+    content.appendChild(renderRecord("server", server));
+    // Everything from messages down sits behind the "debug" toggle
+    const extra = el("div", undefined, "debug-extra");
+    extra.id = "debug-extra";
+    DEBUG_TABLES.forEach((t, i) => extra.appendChild(renderTable(t, tables[i])));
+    extra.appendChild(el("h2", "global_database (from the server, read-only)", "debug-db-title"));
     Object.keys(GLOBAL_DEBUG_TABLES).forEach((t, i) => {
       // Trails come with their parsed line; show its size instead of every point
       const rows = t === "global_trails"
         ? globalTables[i].map(({ segments, ...trail }) => ({
             ...trail, points: segments.reduce((n, seg) => n + seg.length, 0) }))
         : globalTables[i];
-      content.appendChild(renderTable(t, Array.isArray(rows) ? rows : [rows]));
+      extra.appendChild(renderTable(t, Array.isArray(rows) ? rows : [rows]));
     });
-    content.appendChild(el("h2", "This device's GPS", "debug-db-title"));
-    content.appendChild(renderGps());
+    // This device's GPS check, last (it's below messages, so it's behind the toggle too)
+    extra.appendChild(renderGps());
+    const count = DEBUG_TABLES.length + Object.keys(GLOBAL_DEBUG_TABLES).length + 1;
+    content.append(debugToggle(extra, count), extra);
     status.textContent = `Updated ${new Date().toLocaleTimeString()}`;
   } catch (err) {
     status.textContent = `Error: ${err.message}`;
