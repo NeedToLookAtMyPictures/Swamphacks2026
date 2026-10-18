@@ -359,6 +359,25 @@ async function updateSendButton() {
   button.setAttribute("aria-label", `Send, ${CONNECTION_TEXT[c.state]}`);
 }
 
+// Touch screens have no hover, so the button's title tooltip never shows there: show the
+// same text in a bubble above the button while a finger is pressed on it.
+const sendButton = document.getElementById("compose-send");
+const sendTip = msgEl("div", undefined, "send-touch-tip");
+sendTip.hidden = true;
+sendTip.setAttribute("role", "tooltip");
+document.body.appendChild(sendTip);
+
+sendButton.addEventListener("pointerdown", (e) => {
+  if (e.pointerType !== "touch" || !sendButton.title) return;
+  sendTip.textContent = sendButton.title;
+  sendTip.hidden = false;
+  const r = sendButton.getBoundingClientRect();
+  sendTip.style.bottom = `${window.innerHeight - r.top + 8}px`;   // just above the button
+  sendTip.style.right = `${Math.max(8, window.innerWidth - r.right)}px`;
+});
+["pointerup", "pointercancel", "pointerleave"].forEach((type) =>
+  sendButton.addEventListener(type, () => { sendTip.hidden = true; }));
+
 updateSendButton().catch(() => {});
 setInterval(() => {
   if (document.getElementById("messages").classList.contains("active") && !document.hidden) {
