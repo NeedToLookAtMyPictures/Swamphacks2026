@@ -43,19 +43,23 @@ KM_PER_DEGREE = 111.32  # of latitude, and of longitude at the equator
 
 def server_trail(trail_id):
     """(name, GPX) of one of the server's trails: from its database, else from the seed file."""
+    db_trails = []
     if GLOBAL_DB.exists():
         db = GlobalDatabase(GLOBAL_DB)
         gpx = db.trail_gpx(trail_id)
         if gpx is not None:
             return next(t["name"] for t in db.trails() if t["id"] == trail_id), gpx
-        trails = db.trails()
-    else:
-        trails = read_load_file(GLOBAL_SEED)["trails"]
-        for trail in trails:
-            if trail["id"] == trail_id:
-                return trail["name"], trail["gpx"]
-    ids = ", ".join(t["id"] for t in trails) or "none"
-    raise SystemExit(f"The server has no trail {trail_id!r}. Its trails: {ids}")
+        db_trails = db.trails()
+    # A server started before the trail was added to the seed file doesn't have it yet
+    seed_trails = read_load_file(GLOBAL_SEED)["trails"]
+    for trail in seed_trails:
+        if trail["id"] == trail_id:
+            if GLOBAL_DB.exists():
+                print(f"Using {trail_id} from {GLOBAL_SEED.relative_to(HERE)}; the server doesn't have it yet.\n"
+                      f"Give it to the server: python server.py --load-global {GLOBAL_SEED.relative_to(HERE)}")
+            return trail["name"], trail["gpx"]
+    ids = ", ".join(sorted({t["id"] for t in db_trails + seed_trails})) or "none"
+    raise SystemExit(f"No trail {trail_id!r} on the server or in {GLOBAL_SEED.relative_to(HERE)}. Trails: {ids}")
 
 
 def gpx_name(gpx):
@@ -113,15 +117,17 @@ def main():
                              "map to replace the server's map)")
     args = parser.parse_args()
 
+    # Find the trail first, so a wrong id fails before connecting to anything
+    if args.trail:
+        trail_name, gpx = server_trail(args.trail)
+    elif args.gpx:
+        gpx = args.gpx.read_text()
+        trail_name = gpx_name(gpx) or args.gpx.stem
+
     reader, source = open_source(args.source)
     max_zoom = min(args.max_zoom, reader.header()["max_zoom"])
 
     if args.trail or args.gpx:
-        if args.trail:
-            trail_name, gpx = server_trail(args.trail)
-        else:
-            gpx = args.gpx.read_text()
-            trail_name = gpx_name(gpx) or args.gpx.stem
         points = [p for segment in parse_gpx(gpx) for p in segment]
         name = args.name or trail_name
         bbox = padded_bbox(points, args.margin_km)
