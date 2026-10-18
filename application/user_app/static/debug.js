@@ -49,6 +49,50 @@ function renderTable(title, rows) {
   return section;
 }
 
+function renderGps() {
+  // This device's GPS, from location.js: is it getting fixes, and if not, why
+  const section = el("div", undefined, "debug-section");
+  section.id = "gps-debug";
+  section.appendChild(el("h3", "gps"));
+  const rows = [
+    ["attempts / fixes", `${gpsDebug.attempts} / ${gpsDebug.fixes}`],
+    ["last fix", gpsDebug.last_fix ? `${formatValue("time_created", gpsDebug.last_fix.time)}: ` +
+      `${gpsDebug.last_fix.latitude.toFixed(6)}, ${gpsDebug.last_fix.longitude.toFixed(6)} ` +
+      `±${gpsDebug.last_fix.accuracy_m} m` : "none yet"],
+    ["last error", gpsDebug.last_error ? `${formatValue("time_created", gpsDebug.last_error.time)}: ` +
+      `${gpsDebug.last_error.error} ${gpsDebug.last_error.message}` : "none"],
+    ["last save", gpsDebug.last_save || "—"],
+  ];
+  const check = gpsDebug.check;
+  if (check) {
+    rows.push(["check", check.running ? "running…" : `ran ${formatValue("time_created", check.time)}`]);
+    check.findings.forEach(([k, v]) => rows.push([k, v]));
+    check.advice.forEach((a, i) => rows.push([i === 0 ? "what to do" : "", a]));
+  }
+  const table = el("table", undefined, "debug-kv");
+  const body = table.createTBody();
+  rows.forEach(([k, v]) => {
+    const tr = body.insertRow();
+    tr.appendChild(el("th", k));
+    tr.insertCell().textContent = v;
+  });
+  const wrap = el("div", undefined, "debug-table-wrap");
+  wrap.appendChild(table);
+  const button = el("button", check && check.running ? "Checking…" : "Run GPS check");
+  button.disabled = Boolean(check && check.running);
+  button.addEventListener("click", () => {
+    runGpsCheck(null);
+    refreshGpsDebug();
+  });
+  section.append(wrap, button);
+  return section;
+}
+
+function refreshGpsDebug() {
+  const old = document.getElementById("gps-debug");
+  if (old) old.replaceWith(renderGps());
+}
+
 function renderDeviceSetup(content, server) {
   // No identity yet: create one. Names are reserved on the server, so it must be reachable.
   const section = el("div", undefined, "debug-section");
@@ -98,7 +142,7 @@ async function loadDebug() {
     const globalTables = await Promise.all(
       Object.values(GLOBAL_DEBUG_TABLES).map((url) => fetch(url).then((r) => r.json())));
 
-    content.replaceChildren();
+    content.replaceChildren(renderGps());
     if (deviceRes.ok) {
       content.appendChild(renderTable("device_info", [await deviceRes.json()]));
     } else {

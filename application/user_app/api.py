@@ -12,6 +12,7 @@ Records created on this device
     POST   /api/messages                    {receiver, content}; receiver is a name, or "*" for everyone
     POST   /api/messages/<origin>/<seq>/delivered   mark delivered by hand (normally automatic)
     PUT    /api/location                    {latitude, longitude} this user's position
+    POST   /api/location/debug              {lines} the page's GPS check, printed to the terminal
 
 Reading
     GET    /api/contacts                    everyone this device knows about (to pick a receiver)
@@ -59,7 +60,7 @@ def db():
 def sync_soon(response):
     """Anything written here (a message, a comment, a position) goes to the server now
     rather than at the next scheduled sync, so the other person sees it sooner."""
-    if request.method != "GET" and response.status_code < 400:
+    if request.method != "GET" and response.status_code < 400 and request.endpoint != "api.location_debug":
         server_sync.wake()
     return response
 
@@ -198,6 +199,20 @@ def mark_delivered(origin_id, seq):
 def set_location():
     data = body("latitude", "longitude")
     return jsonify(db().set_location(float(data["latitude"]), float(data["longitude"])))
+
+
+@api.post("/location/debug")
+def location_debug():
+    """The page couldn't get a position: print its GPS check where the user can see it.
+
+    On a phone that's the terminal running main.py; the browser's console is hidden.
+    """
+    lines = body("lines")["lines"]
+    if not isinstance(lines, list):
+        raise ValueError("lines must be a list")
+    for line in lines[:50]:
+        print("[gps]", str(line)[:300], flush=True)
+    return "", 204
 
 
 # -- reading ------------------------------------------------------------------------

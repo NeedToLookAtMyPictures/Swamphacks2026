@@ -351,6 +351,8 @@ class ApiTest(unittest.TestCase):
         # a broadcast has no single receiver, so nobody can mark it delivered
         self.assertEqual(c.post(f"/api/messages/{broadcast['origin_id']}/{broadcast['seq']}/delivered").status_code, 403)
         self.assertEqual(c.get("/api/nope").status_code, 404)
+        self.assertEqual(c.post("/api/location/debug", json={"lines": ["first try: TIMEOUT"]}).status_code, 204)
+        self.assertEqual(c.post("/api/location/debug", json={"lines": "nope"}).status_code, 400)
         self.assertEqual(c.post("/api/sync", json={"nope": []}).status_code, 400)
         self.assertEqual(c.post("/api/sync", json={"messages": [{"seq": 1}]}).status_code, 400)
 
