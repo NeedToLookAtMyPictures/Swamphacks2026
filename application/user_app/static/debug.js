@@ -98,6 +98,26 @@ function refreshGpsDebug() {
   if (old) old.replaceWith(renderGps());
 }
 
+function renderKill() {
+  // --phone only: stop the app (Termux keeps it running in the background otherwise)
+  const section = el("div", undefined, "debug-section");
+  section.appendChild(el("h3", "app"));
+  const button = el("button", "Kill app");
+  const status = el("p", undefined, "debug-error");
+  button.addEventListener("click", async () => {
+    if (!confirm("Stop the app? It has to be started again from Termux.")) return;
+    button.disabled = true;
+    try {
+      const res = await fetch("/api/quit", { method: "POST" });
+      status.textContent = res.ok ? "Stopped. Start it again from Termux." : (await res.json()).error;
+    } catch (err) {
+      status.textContent = `Error: ${err.message}`;
+    }
+  });
+  section.append(button, status);
+  return section;
+}
+
 function renderDeviceSetup(content, server) {
   // No identity yet: create one. Names are reserved on the server, so it must be reachable.
   const section = el("div", undefined, "debug-section");
@@ -215,6 +235,7 @@ async function loadDebug() {
     });
     // This device's GPS check, last (it's below messages, so it's behind the toggle too)
     extra.appendChild(renderGps());
+    if (window.PHONE) extra.appendChild(renderKill());  // at the very end
     const count = DEBUG_TABLES.length + Object.keys(GLOBAL_DEBUG_TABLES).length + 1;
     content.append(debugToggle(extra, count), extra);
     status.textContent = `Updated ${new Date().toLocaleTimeString()}`;

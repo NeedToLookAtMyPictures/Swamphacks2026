@@ -181,7 +181,7 @@ class ConnectionStateTests(unittest.TestCase):
         self.bob.post("/api/sync", json={"geolocations": [dict(self.alice_db.list("geolocations")[0])]})
         c = self.state(self.bob)
         self.assertEqual((c["state"], c["via"]), ("lora", "LoRa"))
-        self.assertIn("alice", c["detail"])
+        self.assertEqual(c["detail"], "a device in LoRa range")  # generic: the button is shared by every chat
 
     def test_close_peer_on_a_two_radio_board_is_fast_before_any_message(self):
         self.alice_db.set_location(29.65160, -82.32480)
@@ -192,6 +192,7 @@ class ConnectionStateTests(unittest.TestCase):
         c = self.state(self.bob)
         self.assertEqual((c["state"], c["via"]), ("fast", "ESP-NOW"))
         self.assertIn("m away", c["detail"])
+        self.assertNotIn("alice", c["detail"])
 
     def test_close_peer_without_positions_is_fast(self):
         nodes = self.nodes(lora=True, espnow=True)                     # no GPS fix on either side

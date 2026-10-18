@@ -334,6 +334,23 @@ main {
 #compose button.send-lora { background: #2e5a43; }  /* LoRa only: the app's usual green */
 #compose button.send-none { background: #8a918d; }  /* nothing in reach; still sends */
 
+/* Touch: the Send button's tooltip while a finger is held on it (messages.js); no long-press
+   menu or text selection on the button itself */
+#compose-send { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+.send-touch-tip {
+  position: fixed;
+  z-index: 3000;
+  max-width: min(320px, calc(100vw - 16px));
+  padding: 6px 9px;
+  border-radius: 4px;
+  background: #333;
+  color: #fff;
+  font-size: 13px;
+  line-height: 1.35;
+  pointer-events: none;
+}
+.send-touch-tip[hidden] { display: none; }
+
 .message {
   max-width: 80%;
   padding: 10px 12px;

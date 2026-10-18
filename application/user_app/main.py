@@ -64,6 +64,7 @@ app = Flask(__name__, static_folder="static", template_folder="templates")
 app.config["DATABASE"] = Database()
 app.config["SERVER"] = None  # a server_sync.ServerFinder, set in run()
 app.config["GLOBAL_DATABASE"] = GlobalDatabase()
+app.config["PHONE"] = False  # --phone, set in run()
 app.register_blueprint(api)
 
 
@@ -83,7 +84,20 @@ def static_version(endpoint, values):
 
 @app.route("/")
 def index():
-    return render_template("index.html", maps=load_maps(), default_map=default_map_view())
+    return render_template("index.html", maps=load_maps(), default_map=default_map_view(),
+                           phone=app.config["PHONE"])
+
+
+@app.route("/api/quit", methods=["POST"])
+def quit_app():
+    """--phone only: the Mesh tab's Kill button. Termux has no easy way to stop
+    the app from the browser, so this ends the whole program (mesh included)."""
+    if not app.config["PHONE"]:
+        return {"error": "only with --phone"}, 403
+    print("Stopped from the web interface")
+    # Shortly after, so this response still reaches the page
+    threading.Timer(0.5, lambda: os._exit(0)).start()
+    return {"ok": True}
 
 
 @app.route("/maps/<map_id>.pmtiles")
@@ -230,6 +244,7 @@ def run(args):
         print("No offline map yet. It downloads from the server on the next sync, "
               "or run `python download_locales.py map`.")
     app.config["DATABASE"].purge()
+    app.config["PHONE"] = args.phone
     # Before anything else starts: on Android this reruns the program (see start_mesh)
     if args.phone and not args.mesh_port:
         args.mesh_port = "termux-usb"
