@@ -13,9 +13,7 @@ There are three parts:
 | **Mesh** | `mesh/` | The Python code (`trailmesh`) that syncs the app's data between devices over radio, plus the firmware for the radio boards. |
 | **Server** | `application/server/` | Optional. Collects everyone's data when a device has internet or shares its wifi. |
 
-The radio boards don't make any decisions. Each one is plugged into a laptop,
-Raspberry Pi or phone over USB and just forwards radio packets. All the logic
-runs in Python on that computer.
+The radio boards perform a limited amount of computations. Each one is plugged into a laptop, Raspberry Pi or phone over USB and just forwards radio packets. All the logic runs in Python on that computer.
 
 ```
  browser ──> user app (Flask) ──> app database <── trailmesh node ──USB──> radio board ~~radio~~> other hikers
@@ -33,8 +31,7 @@ its own computer, or both can share one computer (see section 5).
 | Adafruit Feather ESP32-S3, or any ESP32-S3 board | ESP-NOW only | `mesh/firmware/espnow_bridge` | Short range only. |
 
 Also needed:
-- **A USB-C data cable** for each board. Many cables only charge; if the board
-  never shows up on the computer, try another cable.
+- **A USB-C data cable** for each board. 
 - **A host computer** for each board: Windows, macOS or Linux with Python
   3.10+. A Raspberry Pi, or an Android phone running Termux, also works.
 
@@ -126,7 +123,7 @@ plugged in.
 
 ## 4. Run it
 
-### Quickest test: two boards, no app
+### Quickest test (using two boards)
 
 Each command runs one hiker. Use a different `--name`, `--db` and `--port` for each:
 
