@@ -1,5 +1,5 @@
 {
-  "_comment": "Example global data in the format the server sends. Places are real Gainesville parks, but the amenities, descriptions and trail routes are made up / approximate for testing. Trails here use gpx_file (relative to this file); the server sends the GPX text as gpx. The John Muir Trail (trails/John_Muir_Trail.gpx, all of it) is from OpenStreetMap via waymarkedtrails.org; the server sends only its first 29.9 km (trails/John_Muir_Trail_Yosemite_Valley.gpx), whose offline map is about 500 tiles. To send the whole trail instead, point the entry at John_Muir_Trail.gpx. Hawthorne-trail locales are fictional and snapped onto the track in trails/Gainesville-Hawthorne_State_Trail.gpx. The server starts with this file; to change a running server's copy: python server.py --load-global global/global_data.json",
+  "_comment": "Example global data in the format the server sends. Places are real Gainesville parks, but the amenities, descriptions and trail routes are made up / approximate for testing. Trails here use gpx_file (relative to this file); the server sends the GPX text as gpx. The John Muir Trail (trails/John_Muir_Trail.gpx, all of it) is from OpenStreetMap via waymarkedtrails.org; the server sends only its first 29.9 km (trails/John_Muir_Trail_Yosemite_Valley.gpx), whose offline map is about 500 tiles. To send the whole trail instead, point the entry at John_Muir_Trail.gpx. Hawthorne-trail locales are fictional and snapped onto the track in trails/Gainesville-Hawthorne_State_Trail.gpx. John Muir Trail locales are real places along its Yosemite Valley section, snapped onto the track in trails/John_Muir_Trail_Yosemite_Valley.gpx at their trail mileage; their amenities and seasons are approximate, check with Yosemite before relying on them. The server starts with this file; to change a running server's copy: python server.py --load-global global/global_data.json",
   "locales": [
     {
       "id": "water-depot-park-fountain",
@@ -80,6 +80,86 @@
       "latitude": 29.58741,
       "longitude": -82.09,
       "description": "Potable spigot next to the eastern trailhead kiosk"
+    },
+    {
+      "id": "trailhead-happy-isles",
+      "category": "trailhead",
+      "name": "Happy Isles trailhead",
+      "latitude": 37.732397,
+      "longitude": -119.557902,
+      "description": "Start of the John Muir Trail; shuttle stop, restrooms and the mileage sign"
+    },
+    {
+      "id": "water-vernal-fall-footbridge",
+      "category": "water",
+      "name": "Vernal Fall footbridge fountain",
+      "latitude": 37.726224,
+      "longitude": -119.548676,
+      "description": "Drinking fountain by the footbridge restrooms; potable in season, last treated water for 13 miles"
+    },
+    {
+      "id": "water-nevada-fall",
+      "category": "water",
+      "name": "Merced River above Nevada Fall",
+      "latitude": 37.724632,
+      "longitude": -119.533092,
+      "description": "River access upstream of the footbridge; filter or treat, and stay well back from the brink"
+    },
+    {
+      "id": "camp-little-yosemite-valley",
+      "category": "campsite",
+      "name": "Little Yosemite Valley backpackers camp",
+      "latitude": 37.734316,
+      "longitude": -119.515731,
+      "description": "Large wilderness camp with a composting toilet and bear boxes; permit required"
+    },
+    {
+      "id": "water-little-yosemite-merced",
+      "category": "water",
+      "name": "Merced River at Little Yosemite Valley",
+      "latitude": 37.736188,
+      "longitude": -119.514883,
+      "description": "Easy river access below the camp; filter or treat"
+    },
+    {
+      "id": "camp-sunrise",
+      "category": "campsite",
+      "name": "Sunrise backpackers camp",
+      "latitude": 37.794049,
+      "longitude": -119.432951,
+      "description": "Camp by the Sunrise High Sierra Camp; bear boxes, open meadows, cold nights"
+    },
+    {
+      "id": "water-sunrise",
+      "category": "water",
+      "name": "Sunrise camp spigot",
+      "latitude": 37.794774,
+      "longitude": -119.432331,
+      "description": "Spigot near the backpackers camp; potable in summer only, otherwise use the creek and treat it"
+    },
+    {
+      "id": "water-long-meadow",
+      "category": "water",
+      "name": "Long Meadow creek",
+      "latitude": 37.805079,
+      "longitude": -119.429892,
+      "description": "Slow creek through the meadow; filter, can run low by late summer"
+    },
+    {
+      "id": "viewpoint-cathedral-pass",
+      "category": "viewpoint",
+      "name": "Cathedral Pass",
+      "latitude": 37.836611,
+      "longitude": -119.41369,
+      "description": "High point of the section (about 9,700 ft) with views of Cathedral Peak and Matthes Crest"
+    },
+    {
+      "id": "water-upper-cathedral-lake",
+      "category": "water",
+      "name": "Upper Cathedral Lake spur",
+      "latitude": 37.842932,
+      "longitude": -119.413863,
+      "description": "Short side trail to the lake; filter, no camping within 100 ft of the shore"
     }
   ],
   "trails": [

@@ -196,8 +196,10 @@ The data has the form `{locales: [...], trails: [{id, name, description?, gpx}]}
 and loading it replaces everything. GPX tracks (`trkseg`/`trkpt`) and routes
 (`rte`/`rtept`) are read; a trail whose GPX has no line of at least 2 points is
 refused. The server starts with `../server/global/global_data.json` (10 water
-sources and campsites, real Gainesville-area places with made-up amenities, plus
-the Gainesville-Hawthorne Trail and the John Muir Trail's Yosemite Valley section, whose GPX files are in
+sources and campsites, real Gainesville-area places with made-up amenities; 10
+pins at real places along the John Muir Trail's Yosemite Valley section, with
+approximate amenities; the Gainesville-Hawthorne Trail and that JMT section,
+whose GPX files are in
 `../server/global/trails/`; in a file a trail can give `gpx_file` instead of the
 GPX text). To test without a server, load it directly:
 

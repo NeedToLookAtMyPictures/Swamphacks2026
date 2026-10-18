@@ -109,10 +109,10 @@ class ServerSyncTest(unittest.TestCase):
 
     def test_server_starts_with_the_sample_global_data(self):
         data = self.client.get("/api/global").json
-        self.assertEqual(len(data["locales"]), 10)
+        self.assertEqual(len(data["locales"]), 20)
         self.assertEqual([t["id"] for t in data["trails"]], ["trail-gainesville-hawthorne", "trail-john-muir-yosemite"])
         self.assertTrue(data["trails"][0]["gpx"].lstrip().startswith("<?xml"))
-        self.assertEqual(len(self.client.get("/api/global_locales").json), 10)
+        self.assertEqual(len(self.client.get("/api/global_locales").json), 20)
         trail = self.client.get("/api/global_trails").json[0]
         self.assertNotIn("gpx", trail)
         self.assertGreater(trail["points"], 2)
@@ -120,7 +120,7 @@ class ServerSyncTest(unittest.TestCase):
     def test_global_data_reaches_devices_once_and_updates_follow(self):
         globe = GlobalDatabase(Path(self.tmp.name) / "alice-global.db")
         server_sync.sync_once(self.alice, "x", globe)
-        self.assertEqual(len(globe.locales()), 10)
+        self.assertEqual(len(globe.locales()), 20)
         self.assertEqual(len(globe.trails()), 2)
         version = globe.info()["version"]
         self.assertEqual(version, self.client.get("/api/global").json["version"])
