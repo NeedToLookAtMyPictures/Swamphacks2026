@@ -18,10 +18,12 @@ changed since then, and a run of failures backs off exponentially.
 
 Two radios (a Heltec V3 board: `link` = LoRa, `fast_link` = ESP-NOW): discovery
 and the handshake always go over LoRa. HELLO and HELLO_ACK carry each side's
-position; if both are fresh and within `espnow_range` (60 m), the responder
-says so in its HELLO_ACK and both sides move the rest of the exchange to
-ESP-NOW, with ESP-NOW timings (`fast_config`). Otherwise the whole exchange
-runs over LoRa, positions first. The ESP-NOW radio is on only during an
+position; unless both are fresh and further apart than `espnow_range` (60 m),
+the responder says so in its HELLO_ACK and both sides move the rest of the
+exchange to ESP-NOW, with ESP-NOW timings (`fast_config`). A missing or stale
+position doesn't rule ESP-NOW out: the peer may well be close, and a failed try
+falls back to LoRa (below). Otherwise the whole exchange runs over LoRa,
+positions first. The ESP-NOW radio is on only during an
 ESP-NOW exchange. If one fails, that peer gets LoRa for `espnow_retry`
 seconds. Without a fast_link the node uses `link` for everything, which is how
 a board is pinned to LoRa only or ESP-NOW only.
@@ -105,7 +107,7 @@ class Config:
     accept_kinds: frozenset = field(default_factory=lambda: frozenset(Kind))
     positions_first: bool = False  # send positions (pins) before every other record; on for LoRa
 
-    # Two radios (Node with a fast_link): switch the exchange to ESP-NOW when the peer is this close.
+    # Two radios (Node with a fast_link): switch the exchange to ESP-NOW unless the peer is known to be further.
     espnow_range: float = 60.0  # meters
     position_max_age: float = 300.0  # an older own position doesn't count (the app writes one a minute)
     espnow_retry: float = 300.0  # after an ESP-NOW exchange with a peer fails, use LoRa with it this long
@@ -424,8 +426,13 @@ class Node:
 
     # Sessions ---------------------------------------------------------------------
 
-    def _fast_ok(self, peer: int, now: float) -> bool:
+    def fast_ok(self, peer: int, now: float) -> bool:
+        """An exchange with `peer` may move to ESP-NOW (no recent failed ESP-NOW try with it)."""
         return self.fast_link is not None and now >= self._no_fast_until.get(peer, 0)
+
+    def known_too_far(self, a: tuple[float, float] | None, b: tuple[float, float] | None) -> bool:
+        """Both positions are known and further apart than ESP-NOW reaches."""
+        return a is not None and b is not None and distance_m(a, b) > self.cfg.espnow_range
 
     def _start_session(
         self, peer: int, *, initiator: bool, now: float, session_id: int | None = None, peer_sync: int | None = None,
@@ -440,15 +447,14 @@ class Node:
         since, exclude = self._resync.get(peer, (None, frozenset()))
 
         my_pos = self.store.own_position(self.cfg.position_max_age) if self.fast_link is not None else None
-        flags = (HELLO_HAS_FIX if my_pos else 0) | (HELLO_FAST_OK if self._fast_ok(peer, now) else 0)
-        # The responder decides, from both positions, whether the exchange moves to ESP-NOW.
+        flags = (HELLO_HAS_FIX if my_pos else 0) | (HELLO_FAST_OK if self.fast_ok(peer, now) else 0)
+        # The responder decides whether the exchange moves to ESP-NOW: yes unless both positions
+        # are known and too far apart. If ESP-NOW then fails, _end_session pins the peer to LoRa.
         use_fast = espnow_only or (
             not initiator
             and peer_fast_ok
             and bool(flags & HELLO_FAST_OK)
-            and my_pos is not None
-            and peer_pos is not None
-            and distance_m(my_pos, peer_pos) <= self.cfg.espnow_range
+            and not self.known_too_far(my_pos, peer_pos)
         )
         if use_fast and not espnow_only:
             flags |= HELLO_USE_FAST

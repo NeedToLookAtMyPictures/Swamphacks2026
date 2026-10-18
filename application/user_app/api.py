@@ -290,9 +290,10 @@ def connection():
           over ESP-NOW (the Wi-Fi radio, ~60 m)
     lora: nearby devices, but only over LoRa (long range, slow)
     none: no server and nobody in radio range; messages wait until someone is
-    For a Heltec, the node picks ESP-NOW for an exchange when both devices' GPS
-    positions are within espnow_range; the same check is made here from the
-    positions in the database, so the button changes before anything is sent.
+    For a Heltec, the node tries ESP-NOW for an exchange unless both devices' GPS
+    positions are known and further apart than espnow_range (or ESP-NOW with that
+    peer just failed); the same check is made here from the positions in the
+    database, so the button changes before anything is sent.
     """
     finder = current_app.config.get("SERVER")
     current = finder.current if finder else None
@@ -315,7 +316,6 @@ def connection():
     fresh = {g["user"].lower(): g for g in db().list("geolocations") if now - g["time_created"] < POSITION_FRESH}
     device = db().get_device()
     me = fresh.get(device["name"].lower()) if device else None
-    has_espnow = node.fast_link is not None or node.link.radio == "ESP-NOW"
     session = st["session"]
     for p in near:
         name = names.get(p["id"], f"device {p['id']:08x}")
@@ -325,10 +325,13 @@ def connection():
                 or (y and y["ok"] and y["radio"] == "ESP-NOW" and now - y["at"] < NEARBY)):
             return jsonify(state="fast", via="ESP-NOW", detail=f"{name} is in ESP-NOW range")
         them = fresh.get(name.lower())
-        if has_espnow and me and them:
-            d = distance_m((me["latitude"], me["longitude"]), (them["latitude"], them["longitude"]))
-            if d <= node.cfg.espnow_range:
-                return jsonify(state="fast", via="ESP-NOW", detail=f"{name} is {round(d)} m away (ESP-NOW)")
+        if node.fast_link is not None and node.fast_ok(p["id"], now):
+            if me and them:
+                d = distance_m((me["latitude"], me["longitude"]), (them["latitude"], them["longitude"]))
+                if d <= node.cfg.espnow_range:
+                    return jsonify(state="fast", via="ESP-NOW", detail=f"{name} is {round(d)} m away (ESP-NOW)")
+            else:
+                return jsonify(state="fast", via="ESP-NOW", detail=f"{name} is nearby, position unknown (trying ESP-NOW)")
     who = ", ".join(names.get(p["id"], f"device {p['id']:08x}") for p in near)
     return jsonify(state="lora", via="LoRa", detail=f"{who} in LoRa range")
 

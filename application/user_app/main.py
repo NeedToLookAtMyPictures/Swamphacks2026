@@ -279,7 +279,7 @@ def main():
     parser.add_argument("--mesh-board", choices=("espnow", "heltec"), default="espnow",
                         help="espnow: an ESP32 with espnow_bridge; heltec: a Heltec LoRa 32 V3 with heltec_bridge")
     parser.add_argument("--mesh-radio", choices=("auto", "lora", "espnow"), default="auto",
-                        help="heltec only. auto: LoRa, switching to ESP-NOW within 60 m; lora / espnow: that radio only")
+                        help="heltec only. auto: LoRa, switching to ESP-NOW unless over 60 m apart; lora / espnow: that radio only")
     parser.add_argument("--multiple-boards", action="store_true",
                         help="heltec, mesh radio auto: also sync with plain ESP32s (espnow_bridge) over ESP-NOW "
                              "whenever LoRa isn't producing syncs")
