@@ -27,6 +27,8 @@ Global data (set by the company, loaded once from the server; users can't change
     GET    /api/global/categories           each category with its count
     GET    /api/global/trails               trails with their lines parsed from GPX
     GET    /api/global/trails/<id>.gpx      a trail's original GPX file
+    GET    /api/mesh                        the mesh radio: board, nearby devices, current sync,
+                                            recent activity ({enabled: false} without --mesh-port)
     GET    /api/global/info                 {loaded_at, version}
     GET    /api/map/info                    the offline map {name, bbox, center, zooms, version}
     GET    /api/distances?from=&to=         walking distance along the global trails to global
@@ -38,6 +40,7 @@ Global data (set by the company, loaded once from the server; users can't change
 
 import json
 import sqlite3
+import time
 
 from flask import Blueprint, Response, current_app, jsonify, request
 
@@ -201,6 +204,78 @@ def set_location():
 
 
 # -- reading ------------------------------------------------------------------------
+
+MESH_STATUS_EVERY = 3  # seconds between asking the board for fresh counters
+NEARBY = 60  # a device heard this recently counts as nearby (seconds)
+
+
+def peer_names(database):
+    """Mesh id -> person name, for every device this one has a record from.
+
+    A device's mesh id comes from its app device_id (mesh/trailmesh/store.py), and
+    every shared record carries the device_id that made it as origin_id.
+    """
+    from trailmesh.store import mesh_id_of  # importable once main.py started the mesh
+
+    names = {}
+    for table, name_field in (("geolocations", "user"), ("locales", "sender"), ("messages", "sender")):
+        for row in database.list(table):
+            names.setdefault(mesh_id_of(row["origin_id"]), row[name_field])
+    return names
+
+
+def _mesh_board(board, state):
+    if board is None:
+        return None
+    now = time.time()
+    if now - state.get("status_asked", 0) >= MESH_STATUS_EVERY:
+        state["status_asked"] = now
+        board.request_status()  # the answer lands in .status / .lora_status for the next poll
+    en = board.status or {}
+    out = {
+        "connected": board.connected,
+        "mac": board.mac.hex(":") if board.mac else None,
+        "espnow": {"on": bool(en.get("radio_on")), "sent": en.get("tx_ok"), "send_errors": en.get("tx_err"),
+                   "received": en.get("rx")},
+        "lora": None,
+    }
+    lo = getattr(board, "lora_status", None)
+    params = getattr(board, "params", None)
+    if params is not None:
+        lo = lo or {}
+        out["lora"] = {"on": bool(lo.get("radio_on")), "freq_mhz": params.freq_hz / 1e6, "sf": params.sf,
+                       "bw_khz": params.bw_hz // 1000, "power_dbm": params.power_dbm, "sent": lo.get("tx_ok"),
+                       "received": lo.get("rx"), "crc_errors": lo.get("rx_crc_err"), "airtime_ms": lo.get("airtime_ms")}
+    return out
+
+
+@api.get("/mesh")
+def mesh_status():
+    """What the mesh radio is doing, for the Mesh tab and the badge in the tab bar."""
+    state = current_app.config.get("MESH")
+    if state is None:
+        return jsonify(enabled=False)
+    out = {"enabled": True, "port": state["port"], "board_kind": state["board_kind"], "radio": state["radio"],
+           "board": _mesh_board(state["board"], state), "node": None,
+           "events": list(state["events"])}
+    node = state["node"]
+    if node is not None:
+        st = node.status()
+        names = peer_names(db())
+        def label(peer):
+            return names.get(peer, f"device {peer:08x}")
+        for p in st["peers"]:
+            p["name"] = label(p["id"])
+            p["id"] = f"{p['id']:08x}"
+        st["peers"].sort(key=lambda p: -(p["last_heard"] or 0))
+        if st["session"]:
+            st["session"]["peer_name"] = label(st["session"]["peer"])
+            st["session"]["peer"] = f"{st['session']['peer']:08x}"
+        st["id"] = f"{st['id']:08x}"
+        st["nearby"] = sum(1 for p in st["peers"] if p["last_heard"] and st["now"] - p["last_heard"] < NEARBY)
+        out["node"] = st
+    return jsonify(out)
+
 
 @api.get("/contacts")
 def contacts():

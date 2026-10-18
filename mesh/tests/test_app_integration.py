@@ -8,6 +8,7 @@ app database -> peer's API -> peer's UI.
 
 Needs Flask (the app's requirements); skipped without it.
 """
+import collections
 import os
 import random
 import sys
@@ -58,6 +59,38 @@ class AppIntegrationTests(unittest.TestCase):
                  on_delivered=lambda o, s: self.delivered.append((o, s)), rng=random.Random(1)),
             Node(self.medium.link("b"), AppStore(self.bob_db), cfg, clock=self.clock, rng=random.Random(2)),
         ]
+
+    def test_mesh_status_names_peers_and_rows_say_how_they_arrived(self):
+        """GET /api/mesh (the Mesh tab) and received_via (the "via ..." notes)."""
+        self.assertEqual(self.bob.get("/api/mesh").get_json(), {"enabled": False})
+        # What main.py's start_mesh puts in the app config, minus a real board
+        self.bob.application.config["MESH"] = {
+            "port": "sim", "board_kind": "espnow", "radio": "auto", "board": None,
+            "node": self.nodes[1], "events": collections.deque([{"at": 0, "text": "hello"}]),
+        }
+        sent = self.alice.post("/api/messages", json={"receiver": "*", "content": "bear at the shelter"}).get_json()
+        run(self.nodes, self.clock, 15, until=lambda: bool(self.nodes[1].syncs))
+        self.assertTrue(self.nodes[1].syncs, "no exchange finished")
+
+        st = self.bob.get("/api/mesh").get_json()
+        self.assertTrue(st["enabled"])
+        self.assertEqual(st["events"], [{"at": 0, "text": "hello"}])
+        node = st["node"]
+        self.assertEqual(node["id"], "00000002")
+        self.assertEqual(node["nearby"], 1)
+        [peer] = node["peers"]
+        self.assertEqual(peer["name"], "alice")  # from alice's message's origin_id
+        self.assertEqual(peer["id"], "00000001")
+        self.assertEqual(peer["heard_on"], "ESP-NOW")
+        self.assertEqual(peer["rssi"], -60)
+        self.assertTrue(peer["last_sync"]["ok"])
+        self.assertEqual(peer["last_sync"]["radio"], "ESP-NOW")
+        self.assertGreaterEqual(peer["last_sync"]["received"], 1)
+
+        theirs = self.bob.get(f"/api/messages/{sent['origin_id']}/{sent['seq']}").get_json()
+        self.assertEqual(theirs["received_via"], "ESP-NOW")
+        mine = self.alice.get(f"/api/messages/{sent['origin_id']}/{sent['seq']}").get_json()
+        self.assertIsNone(mine["received_via"])  # written on this device
 
     def test_message_posted_in_one_app_appears_in_the_other_and_is_delivered(self):
         sent = self.alice.post("/api/messages", json={"receiver": "bob", "content": "bridge out at mile 12"})

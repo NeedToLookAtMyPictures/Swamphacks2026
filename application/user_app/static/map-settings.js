@@ -87,6 +87,8 @@ function renderLastKnownList() {
     const text = settingsEl("span");
     text.appendChild(settingsEl("span", personLabel(g.user), "settings-person-name"));
     text.appendChild(settingsEl("span", lastSeenText(g), "settings-person-time"));
+    const via = arrivalNote(g);  // how this position got here (mesh.js)
+    if (via) text.appendChild(via);
     row.append(checkbox, text);
     return row;
   }));

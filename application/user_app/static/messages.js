@@ -42,7 +42,10 @@ function renderMessage(m) {
 
   const head = msgEl("div", undefined, "message-head");
   head.appendChild(msgEl("strong", outgoing ? "You" : m.sender));
-  head.appendChild(msgEl("span", new Date(m.time_created * 1000).toLocaleString()));
+  const right = msgEl("span", undefined, "message-head-right");
+  // Date only; the time is in the details box (the "i" button)
+  right.appendChild(msgEl("span", new Date(m.time_created * 1000).toLocaleDateString()));
+  head.appendChild(right);
   card.appendChild(head);
   card.appendChild(msgEl("div", m.content, "message-body"));
 
@@ -51,7 +54,73 @@ function renderMessage(m) {
     const note = broadcast ? "expired" : m.received ? "received" : "received or died";
     card.appendChild(msgEl("div", note, "message-note"));
   }
+  addMessageInfo(card, right, m, outgoing);  // last, so the details box sits below everything
   return card;
+}
+
+// Every message has an "i" button with the same details: when it was sent, when it was
+// received and how it came (LoRa, ESP-NOW, the server). For our own messages those come
+// from the receiver's delivery receipt. Which ones are open survives the 1 s redraws.
+const openInfo = new Set();
+
+function fmtTime(seconds) {
+  return new Date(seconds * 1000).toLocaleString();
+}
+
+let receipts = new Map();  // "origin_id/seq" of our message -> its "delivered" tombstone
+
+const viaLabel = (via) => (via ? VIA_LABELS[via] || via : "not recorded");
+
+// Sent / Received / Came by for one of our own messages, from its delivery receipt.
+// "Came by" is how the receipt reached us: the message's own route over the last hop
+// when the two devices synced directly, which is the usual case.
+function sentMessageRows(m) {
+  const sent = ["Sent", fmtTime(m.time_created)];
+  if (m.receiver === BROADCAST) {
+    return [sent, ["Received", m.is_dead ? "expired (no receipts for Everyone)" : "by everyone it reaches"],
+            ["Came by", "no receipts for Everyone"]];
+  }
+  const receipt = receipts.get(`${m.origin_id}/${m.seq}`);
+  if (receipt) return [sent, ["Received", fmtTime(receipt.time_created)], ["Came by", viaLabel(receipt.received_via)]];
+  if (m.is_dead) return [sent, ["Received", "unknown (receipt expired)"], ["Came by", "unknown"]];
+  return [sent, ["Received", "not yet"], ["Came by", "–"]];
+}
+
+function addMessageInfo(card, headRight, m, outgoing) {
+  const key = `${m.origin_id}/${m.seq}`;
+  const button = msgEl("button", "i", "message-info-btn");
+  button.type = "button";
+  button.title = "Message details";
+  button.setAttribute("aria-label", "Message details");
+  headRight.appendChild(button);
+
+  const info = msgEl("dl", undefined, "message-info");
+  let rows;
+  if (outgoing) {
+    rows = sentMessageRows(m);
+  } else {
+    // No received_via on someone else's message: it arrived before the app recorded how
+    rows = [["Sent", fmtTime(m.time_created)],
+            ["Received", fmtTime(m.time_received)],
+            ["Came by", viaLabel(m.received_via)]];
+  }
+  for (const [label, value] of rows) {
+    info.append(msgEl("dt", label), msgEl("dd", value));
+  }
+  card.appendChild(info);
+
+  const show = (open) => {
+    info.hidden = !open;
+    card.classList.toggle("info-open", open);  // widens the card (style.css)
+    button.classList.toggle("open", open);
+    button.setAttribute("aria-expanded", String(open));
+  };
+  show(openInfo.has(key));
+  button.addEventListener("click", () => {
+    const open = !openInfo.has(key);
+    if (open) openInfo.add(key); else openInfo.delete(key);
+    show(open);
+  });
 }
 
 let lastMessages = [];
@@ -70,17 +139,23 @@ async function loadMessages() {
   }
   myName = (await deviceRes.json()).name;
 
-  const [messages, contacts, gps] = await Promise.all([
+  const [messages, contacts, gps, tombstones] = await Promise.all([
     fetch("/api/messages").then((r) => r.json()),
     fetch("/api/contacts").then((r) => r.json()),
     fetch("/api/geolocations").then((r) => r.json()),
+    fetch("/api/tombstones").then((r) => r.json()),
   ]);
 
   // Redrawing resets the New chat dropdown and the scroll position, so skip it
   // when nothing changed since the last refresh
-  const snapshot = JSON.stringify([myName, selected, messages, contacts, gps]);
+  const snapshot = JSON.stringify([myName, selected, messages, contacts, gps, tombstones]);
   if (snapshot === lastSnapshot) return;
   lastSnapshot = snapshot;
+
+  // The receiver's device makes a "delivered" tombstone the moment one of our messages
+  // reaches it, so its time is when the message was received.
+  receipts = new Map(tombstones.filter((t) => t.reason === "delivered")
+                               .map((t) => [`${t.target_origin_id}/${t.target_seq}`, t]));
 
   fillNewChat(gps.filter((g) => !sameName(g.user, myName)));
 

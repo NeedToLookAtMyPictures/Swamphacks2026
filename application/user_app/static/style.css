@@ -538,3 +538,93 @@ main {
 
 .locale-comment-body { margin-top: 4px; white-space: pre-wrap; }
 .locale-note { color: #888; font-size: 14px; margin: 4px 0; }
+
+/* Mesh status at the top of the Debug tab, and its badge on the tab button (mesh.js) */
+.mesh-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  background: #4a5d53;
+  color: #e6efe9;
+}
+.mesh-badge::before { content: "●"; margin-right: 4px; }
+.mesh-badge.ok::before { color: #6fe39a; }
+.mesh-badge.syncing::before { color: #ffd166; animation: mesh-pulse 0.8s infinite alternate; }
+.mesh-badge.idle::before { color: #b8c7bf; }
+.mesh-badge.error::before { color: #ff7b72; }
+.mesh-badge.off::before { color: #7d8c84; }
+@keyframes mesh-pulse { from { opacity: 1; } to { opacity: 0.3; } }
+
+#mesh-status { margin-bottom: 4px; }
+.mesh-card {
+  background: #fff;
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin: 0 0 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+.mesh-card h3 { margin: 0 0 8px; font-size: 16px; color: #1f3b2d; }
+.mesh-note { color: #777; font-size: 13px; font-weight: normal; margin: 2px 0; }
+.mesh-kv { display: flex; gap: 10px; font-size: 14px; padding: 2px 0; }
+.mesh-k { flex: 0 0 90px; color: #666; }
+.mesh-v { flex: 1; overflow-wrap: anywhere; }
+.mesh-syncing {
+  background: #fff6d6;
+  border-left: 3px solid #e0a800;
+  padding: 6px 10px;
+  margin-bottom: 8px;
+  font-size: 14px;
+}
+.mesh-peer { padding: 6px 0; border-top: 1px solid #eee; }
+.mesh-peer:first-child { border-top: none; }
+.mesh-peer.stale { opacity: 0.55; }
+.mesh-peer-head { display: flex; justify-content: space-between; gap: 8px; }
+.mesh-signal { font-family: ui-monospace, monospace; font-size: 13px; color: #2e5a43; }
+.mesh-event { display: flex; gap: 10px; font-size: 14px; padding: 3px 0; border-top: 1px solid #f0f0f0; }
+.mesh-event:first-child { border-top: none; }
+.mesh-event-time { flex: 0 0 80px; color: #888; }
+
+/* How a record reached this device (arrivalNote in mesh.js) */
+.via-note { font-size: 12px; margin-top: 4px; color: #555; }
+.via-note::before { content: "↘ "; }
+.via-lora { color: #7a4fb5; }
+.via-espnow { color: #1f6fb2; }
+.via-server { color: #2e7d4f; }
+
+/* Received messages: details behind an "i" button (messages.js addMessageInfo) */
+.message-head-right { display: inline-flex; align-items: center; gap: 8px; }
+.message-info-btn {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid #9aa9a1;
+  border-radius: 50%;
+  background: #fff;
+  color: #4a5d53;
+  font: italic bold 11px/16px Georgia, serif;
+  cursor: pointer;
+  flex: none;
+}
+.message-info-btn:hover, .message-info-btn.open { background: #2e5a43; border-color: #2e5a43; color: #fff; }
+.message-info {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 10px;
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  background: #f3f6f4;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #444;
+}
+.message-info[hidden] { display: none; }
+/* A short message makes a narrow card; widen it while its details are open so each
+   detail stays on one line (class set by messages.js, so no :has() needed) */
+.message.info-open { min-width: min(300px, 95%); max-width: 95%; }
+/* The widened card fits every value on one line; only in a cramped chat (phone with the
+   chats list open) do values wrap, rather than being cut off */
+.message-info dd { overflow-wrap: anywhere; }
+.message-info dt { color: #777; }
+.message-info dd { margin: 0; }

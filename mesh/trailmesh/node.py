@@ -214,6 +214,9 @@ class Node:
         self._window_idx: int | None = None
         self._beacon_times: list[float] = []
         self._next_beacon = 0.0
+        # For the app's mesh panel (status()): every peer heard, and each peer's last exchange.
+        self.heard: dict[int, tuple[float, int | None, str]] = {}  # peer -> (time, rssi dBm, radio)
+        self.syncs: dict[int, tuple[float, bool, str, int, int]] = {}  # peer -> (end, ok, radio, got, sent)
 
     # Main loop ----------------------------------------------------------------
 
@@ -254,6 +257,37 @@ class Node:
                 self._fast_on = fast
         if awake and self.session is None:
             self._maybe_beacon(now)
+
+    def status(self, now: float | None = None) -> dict:
+        """Snapshot of what the node is doing, for the app's mesh panel.
+
+        Safe to call from another thread (the web server): it only copies.
+        Peers are mesh ids; the app turns them into names.
+        """
+        now = self.clock() if now is None else now
+        heard, syncs, s = dict(self.heard), dict(self.syncs), self.session
+        peers = []
+        for peer in heard.keys() | syncs.keys():
+            h, y = heard.get(peer), syncs.get(peer)
+            peers.append({
+                "id": peer,
+                "last_heard": h[0] if h else None,
+                "rssi": h[1] if h else None,
+                "heard_on": h[2] if h else None,
+                "last_sync": None if y is None else
+                {"at": y[0], "ok": y[1], "radio": y[2], "received": y[3], "sent": y[4]},
+            })
+        return {
+            "id": self.id,
+            "now": now,
+            "radio": self.link.radio,
+            "fast_radio": self.fast_link.radio if self.fast_link is not None else None,
+            "always_on": self.cfg.always_on,
+            "awake": bool(self._radio_on),
+            "session": None if s is None else
+            {"peer": s.peer_id, "radio": s.radio, "started": s.started, "initiator": s.initiator},
+            "peers": peers,
+        }
 
     # Discovery ------------------------------------------------------------------
 
@@ -359,6 +393,7 @@ class Node:
         if f is None or f.sender == self.id:
             return
         (self._fast_addr if fast else self._addr)[f.sender] = rx.src
+        self.heard[f.sender] = (now, rx.rssi, (self.fast_link if fast else self.link).radio)
 
         s = self.session
         if s is not None and f.sender == s.peer_id and f.session == s.id:
@@ -470,6 +505,7 @@ class Node:
         if self.fast_link is not None:
             self.fast_link.set_partner(None)
         peer = s.peer_id
+        self.syncs[peer] = (now, s.ok, s.radio, s.records_received, s.records_sent)
         if s.fast and not s.ok and not s.espnow_only:
             self._no_fast_until[peer] = now + self.cfg.espnow_retry  # out of ESP-NOW range after all
         if s.espnow_only:

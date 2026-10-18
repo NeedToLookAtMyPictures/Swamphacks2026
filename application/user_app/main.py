@@ -23,6 +23,7 @@ Two hikers on one computer (each with its own database, web port and board):
 """
 
 import argparse
+import collections
 import ipaddress
 import logging
 import os
@@ -121,13 +122,32 @@ def start_mesh(db, serial_port, demo, board_kind="espnow", radio="auto", multipl
     the web interface), since the mesh identifies devices by it.
     """
     sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "mesh"))
+    from api import peer_names
     from trailmesh import AppStore
     from trailmesh.espnow_serial import LinkLost
     from trailmesh.radio import build_node, open_board
     from trailmesh.transport import TransportError
 
+    # What the web interface's Mesh tab shows (GET /api/mesh): the board, the node once
+    # it runs, and the last few things that happened on the mesh.
+    state = app.config["MESH"] = {
+        "port": serial_port, "board_kind": board_kind, "radio": radio,
+        "board": None, "node": None, "events": collections.deque(maxlen=30),
+    }
+
     def mesh_log(*msg):
         print("[mesh]", *msg, flush=True)
+
+    def event(text):
+        state["events"].appendleft({"at": time.time(), "text": text})
+        mesh_log(text)
+
+    def describe(r):
+        d = r.data
+        who = d.get("sender") or d.get("user") or d.get("origin_id")
+        what = {"LOCALE": "a comment", "MESSAGE": "a message", "GEOLOCATION": "a position",
+                "TOMBSTONE": "a delivery receipt" if d.get("reason") == "delivered" else "a tombstone"}
+        return f"received {what.get(r.kind.name, r.kind.name.lower())} from {who}"
 
     if multiple_boards and radio == "lora":
         sys.exit("--multiple-boards needs --mesh-radio auto: radio lora never turns ESP-NOW on")
@@ -136,18 +156,20 @@ def start_mesh(db, serial_port, demo, board_kind="espnow", radio="auto", multipl
     except TransportError as e:
         sys.exit(f"can't open the mesh board: {e}")
     board.set_radio(False)  # the node turns on the radio it uses when it starts
+    state["board"] = board
 
     def worker():
         while db.get_device() is None:
             time.sleep(1)
         node = build_node(
             board, AppStore(db), radio=radio, config=dict(always_on=demo), multiple_boards=multiple_boards,
-            on_record=lambda r: mesh_log(f"received {r.kind.name.lower()} from the mesh"),
-            on_delivered=lambda origin, seq: mesh_log(f"message {origin}/{seq} was delivered"),
-            on_session_end=lambda s: mesh_log(
-                f"sync with node {s.peer_id:08x} over {'ESP-NOW' if s.fast or node.link is board else 'LoRa'} "
-                f"{'ok' if s.ok else 'failed'}"),
+            on_record=lambda r: event(describe(r)),
+            on_delivered=lambda origin, seq: event("one of your messages was delivered"),
+            on_session_end=lambda s: event(
+                f"sync with {peer_names(db).get(s.peer_id, f'device {s.peer_id:08x}')} over {s.radio} "
+                f"{'ok' if s.ok else 'failed'} (got {s.records_received}, sent {s.records_sent})"),
         )
+        state["node"] = node
         mesh_log(f"node {node.id:08x} running on {serial_port} ({board_kind}, radio {radio})")
         try:
             node.run_forever()

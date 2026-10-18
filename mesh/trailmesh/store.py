@@ -23,6 +23,21 @@ import zlib
 from .records import ID_LEN, TABLE, Kind, Record, record_id
 
 
+def mesh_id_of(device_id: str) -> int:
+    """The u32 the mesh uses for the device with this app device_id.
+
+    The app generates device_id as 8 hex digits, which is used as is.
+    Any other string is hashed, which is fine as long as ids stay unique.
+    """
+    try:
+        n = int(device_id, 16)
+        if 0 < n < 2**32:
+            return n
+    except ValueError:
+        pass
+    return zlib.crc32(device_id.encode()) or 1
+
+
 class AppStore:
     def __init__(self, db):
         """db: an initialized application/user_app/database.py `Database`."""
@@ -37,18 +52,8 @@ class AppStore:
 
     @property
     def mesh_id(self) -> int:
-        """The u32 the mesh uses for this device (frame sender, firmware filter).
-
-        The app generates device_id as 8 hex digits, which is used as is.
-        Any other string is hashed, which is fine as long as ids stay unique.
-        """
-        try:
-            n = int(self.device_id, 16)
-            if 0 < n < 2**32:
-                return n
-        except ValueError:
-            pass
-        return zlib.crc32(self.device_id.encode()) or 1
+        """The u32 the mesh uses for this device (frame sender, firmware filter)."""
+        return mesh_id_of(self.device_id)
 
     # Reading -------------------------------------------------------------------
 
