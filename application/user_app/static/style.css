@@ -325,6 +325,11 @@ main {
 
 #compose-status { color: #555; font-size: 14px; }
 
+/* Send button colour = how fast a message would leave right now (messages.js updateSendButton) */
+#compose button.send-fast { background: #1f6fb2; }  /* server or ESP-NOW */
+#compose button.send-lora { background: #2e5a43; }  /* LoRa only: the app's usual green */
+#compose button.send-none { background: #8a918d; }  /* nothing in reach; still sends */
+
 .message {
   max-width: 80%;
   padding: 10px 12px;

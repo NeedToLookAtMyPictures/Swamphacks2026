@@ -68,6 +68,20 @@ app.config["PHONE"] = False  # --phone, set in run()
 app.register_blueprint(api)
 
 
+@app.url_defaults
+def static_version(endpoint, values):
+    """Add the file's modification time to every static URL (style.css?v=...).
+
+    Browsers otherwise keep running a cached copy of the old script or stylesheet
+    after an update (a pull, a branch switch) until someone hard-refreshes.
+    """
+    if endpoint == "static" and "filename" in values and "v" not in values:
+        try:
+            values["v"] = int((Path(app.static_folder) / values["filename"]).stat().st_mtime)
+        except OSError:
+            pass
+
+
 @app.route("/")
 def index():
     return render_template("index.html", maps=load_maps(), default_map=default_map_view(),
