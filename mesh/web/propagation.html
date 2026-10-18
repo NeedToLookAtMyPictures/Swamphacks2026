@@ -1,0 +1,595 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trail News Spread</title>
+<!--
+  How one trail report spreads hiker to hiker, with and without relay boxes at shelters.
+
+  Encounter-level model, not the packet-level simulator (trailmesh/sim.py): over days
+  and dozens of hikers, what matters is who is within radio range of whom. Two devices
+  in range sync; on the real Heltec boards a LoRa exchange of a small update took
+  ~1.5 s, while hikers stay in range of each other for minutes to hours, so an
+  encounter in range = the update moves. Everything runs in this page; open it directly.
+-->
+<style>
+  :root {
+    color-scheme: light;
+    --surface-0: #f4f4f2;
+    --surface-1: #fcfcfb;
+    --border: #e2e1dc;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted: #7a7974;
+    --grid: #e7e6e1;
+    --trail: #8d8a80;
+    --night: rgba(30, 40, 70, 0.07);
+    --series-1: #2a78d6;   /* with relay boxes */
+    --series-2: #1baf7a;   /* without relay boxes */
+    --informed: #eb6834;   /* hiker knows about the dry spring */
+    --uninformed: #b9b7ae;
+    --relay: #4a3aa7;
+    --accent: #2e5a43;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --surface-0: #121211;
+      --surface-1: #1a1a19;
+      --border: #33322f;
+      --text-primary: #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted: #8f8e86;
+      --grid: #2c2b28;
+      --trail: #77756c;
+      --night: rgba(120, 140, 220, 0.08);
+      --series-1: #3987e5;
+      --series-2: #199e70;
+      --informed: #d95926;
+      --uninformed: #5f5e58;
+      --relay: #9085e9;
+      --accent: #6fb38b;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface-0: #121211; --surface-1: #1a1a19; --border: #33322f;
+    --text-primary: #ffffff; --text-secondary: #c3c2b7; --text-muted: #8f8e86;
+    --grid: #2c2b28; --trail: #77756c; --night: rgba(120, 140, 220, 0.08);
+    --series-1: #3987e5; --series-2: #199e70; --informed: #d95926; --uninformed: #5f5e58;
+    --relay: #9085e9; --accent: #6fb38b;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--surface-0);
+    color: var(--text-primary);
+    font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main { max-width: 1040px; margin: 0 auto; padding: 20px 16px 40px; }
+  h1 { font-size: 24px; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .lede { color: var(--text-secondary); margin: 0 0 16px; max-width: 760px; }
+  .card {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-bottom: 14px;
+  }
+  .card h2 { font-size: 15px; margin: 0 0 8px; }
+
+  .controls { display: flex; flex-wrap: wrap; gap: 10px 22px; align-items: center; }
+  .controls label { display: flex; align-items: center; gap: 8px; color: var(--text-secondary); font-size: 14px; }
+  .controls input[type="range"] { width: 120px; accent-color: var(--accent); }
+  .controls output { color: var(--text-primary); font-variant-numeric: tabular-nums; min-width: 3.5em; }
+  button {
+    font: inherit; font-size: 14px;
+    padding: 6px 14px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--surface-1);
+    color: var(--text-primary);
+    cursor: pointer;
+  }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+  .tile { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+  .tile .k { font-size: 13px; color: var(--text-secondary); }
+  .tile .v { font-size: 30px; font-weight: 650; font-variant-numeric: tabular-nums; line-height: 1.15; margin-top: 2px; }
+  .tile .s { font-size: 13px; color: var(--text-muted); }
+  .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: baseline; }
+
+  .trail-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  #clock { font-variant-numeric: tabular-nums; color: var(--text-secondary); font-size: 14px; }
+  #trail { width: 100%; height: 230px; display: block; }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; color: var(--text-secondary); margin-top: 6px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+
+  .chart-wrap { position: relative; }
+  #chart { width: 100%; height: 280px; display: block; overflow: visible; }
+  #chart .gridline { stroke: var(--grid); stroke-width: 1; }
+  #chart .axis-label { fill: var(--text-muted); font-size: 12px; }
+  #chart .direct-label { fill: var(--text-secondary); font-size: 12px; font-weight: 600; }
+  #tooltip {
+    position: absolute; pointer-events: none;
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 6px;
+    padding: 6px 9px; font-size: 13px; box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+    white-space: nowrap; display: none;
+  }
+  details { margin-top: 8px; font-size: 13px; color: var(--text-secondary); }
+  table { border-collapse: collapse; margin-top: 6px; font-variant-numeric: tabular-nums; }
+  th, td { padding: 3px 12px 3px 0; text-align: right; border-bottom: 1px solid var(--border); }
+  th:first-child, td:first-child { text-align: left; }
+  .notes { font-size: 13px; color: var(--text-secondary); }
+  .notes li { margin-bottom: 4px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>How a trail report spreads without cell service</h1>
+  <p class="lede">A northbound hiker passes a <strong>dry spring at km 72</strong> and posts it. There's no signal,
+    and most hikers are behind them, walking the same way, so the report has to travel <em>against</em> the flow:
+    carried by the few southbound hikers, or by relay boxes at the shelters. Does it reach the hikers walking
+    toward the spring before they get there? Same hikers, same days, with and without relay boxes.</p>
+
+  <div class="card controls" role="group" aria-label="Simulation settings">
+    <label>Hikers <input id="hikers" type="range" min="15" max="150" step="5" value="60"><output id="hikers-out">60</output></label>
+    <label>LoRa range <input id="range" type="range" min="0.5" max="5" step="0.25" value="2"><output id="range-out">2 km</output></label>
+    <label>Northbound <input id="nobo" type="range" min="50" max="95" step="5" value="85"><output id="nobo-out">85%</output></label>
+    <label><input id="relays" type="checkbox" checked> Animate with relay boxes</label>
+    <button id="reroll" type="button">New hikers</button>
+    <button id="play" type="button" class="primary">Pause</button>
+    <label>Speed <input id="speed" type="range" min="1" max="30" step="1" value="8"><output id="speed-out">8 min/frame</output></label>
+  </div>
+
+  <div class="tiles" id="tiles"></div>
+  <p id="averages" class="lede" style="margin:10px 0 0;font-size:14px"></p>
+
+  <div class="card" style="margin-top:14px">
+    <div class="trail-head">
+      <h2 id="trail-title">The trail</h2>
+      <span id="clock"></span>
+    </div>
+    <canvas id="trail" aria-label="Animated map of hikers on a 100 km trail"></canvas>
+    <div class="legend">
+      <span><i class="dot" style="background:var(--informed)"></i>knows the spring is dry</span>
+      <span><i class="dot" style="background:var(--uninformed)"></i>hasn't heard yet</span>
+      <span>▲ above the trail: northbound · ▼ below: southbound</span>
+      <span><i class="swatch" style="background:var(--relay)"></i>relay box at a shelter</span>
+      <span>shaded: night, hikers camped</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Share of hikers on the trail who know, over time</h2>
+    <div class="legend" style="margin:0 0 6px">
+      <span><i class="swatch" style="background:var(--series-1)"></i>with relay boxes</span>
+      <span><i class="swatch" style="background:var(--series-2)"></i>hikers only (dashed)</span>
+    </div>
+    <div class="chart-wrap">
+      <svg id="chart" role="img" aria-label="Line chart: percent of hikers who know about the dry spring over 72 hours, with and without relay boxes"></svg>
+      <div id="tooltip"></div>
+    </div>
+    <details>
+      <summary>Show as a table</summary>
+      <table id="data-table"></table>
+    </details>
+  </div>
+
+  <div class="card notes">
+    <h2>How this is modelled</h2>
+    <ul>
+      <li><strong>Trail:</strong> 100 km with a shelter every 10 km. Most hikers go north (85% by default; on the AT
+        the large majority of thru-hikers do). Each walks 2.8–4.2 km/h from around 7:00,
+        heads for the next shelter after 17:30 and camps there (or wherever they are at 20:00). Hikers leaving the section are replaced by new
+        hikers who haven't heard anything.</li>
+      <li><strong>Radio:</strong> each minute, a device learns the news from any device within LoRa range that already had it,
+        so news moves at most one hop per minute (devices wake every 20 s and a small LoRa exchange took about 1.5 s on the Heltec boards). The range is a setting. 2 km is a cautious figure for SF7 in forest; it hasn't been measured in the field yet.</li>
+      <li><strong>Relay boxes:</strong> a solar board at each shelter that's always on and stores and passes on whatever it hears.
+        Its antenna is mounted up high, so it also reaches the boxes at the neighbouring shelters (10 km). That's an assumption,
+        realistic for elevated LoRa antennas but not yet tested, and it lets news move along the trail in both directions
+        whichever way people walk.</li>
+      <li><strong>"Warned":</strong> a hiker who reaches km 72 after the report was made, and already knew when they got there.</li>
+      <li>This is an encounter-level model built for scale. The protocol itself, packet by packet, is tested by
+        <code>trailmesh/sim.py</code> and on the real boards.</li>
+    </ul>
+  </div>
+</main>
+
+<script>
+"use strict";
+// ---- model ----------------------------------------------------------------------
+const L = 100;                 // km of trail
+const SHELTERS = Array.from({ length: 10 }, (_, i) => 5 + 10 * i);
+const SPRING = 72;             // km of the dry spring
+const START_HOUR = 12;         // the report is made on day 1 at noon, with everyone out walking
+const HOURS = 72;
+const DT = 1 / 60;             // one-minute steps, in hours
+const STEPS = HOURS / DT;
+const RELAY_LINK_KM = 10;     // relay boxes have antennas up high: each reaches the next shelter
+
+function rng(seed) {           // mulberry32: same seed, same hikers, in both scenarios
+  return function () {
+    seed |= 0; seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function newHiker(rand, dir, pos) {
+  return {
+    dir, pos,
+    speed: 2.8 + rand() * 1.4,
+    startAt: 6.5 + rand() * 1.5,    // hour of day they start walking
+    informed: false,
+    camped: false,
+    knewAt: null,                    // km from the spring when they learned
+  };
+}
+
+// One run. Returns per-step history (for the animation) and the series/metrics.
+function simulate({ hikers, rangeKm, relays, seed, record, noboShare }) {
+  const rand = rng(seed);
+  const hs = [];
+  for (let i = 0; i < hikers; i++) {
+    const dir = rand() < noboShare ? 1 : -1;
+    hs.push(newHiker(rand, dir, rand() * L));
+  }
+  // The reporter: northbound, just past the spring, so walking away from the
+  // northbound hikers behind who need the news (the usual case on a NOBO-heavy trail)
+  const reporter = newHiker(rand, 1, SPRING + 0.2);
+  reporter.informed = true;
+  hs.push(reporter);
+  const relayInformed = SHELTERS.map(() => false);
+
+  const share = new Float32Array(STEPS + 1);
+  const hist = record ? [] : null;
+  let arrived = 0, warned = 0;
+  const leadKm = [];
+
+  for (let step = 0; step <= STEPS; step++) {
+    const hourOfDay = (START_HOUR + step * DT) % 24;
+
+    // 1. radio: a device learns from any device within range that already knew at the
+    //    start of this minute. One hop per minute: real devices wake every 20 s and an
+    //    exchange takes seconds, so news can't race down a long chain in an instant.
+    const nodes = hs.map((h, i) => ({ pos: h.pos, i, knew: h.informed }));
+    if (relays) SHELTERS.forEach((pos, r) => nodes.push({ pos, r, knew: relayInformed[r] }));
+    nodes.sort((a, b) => a.pos - b.pos);
+    const learns = new Array(nodes.length).fill(false);
+    let lastKnew = -Infinity;                      // sweep right: nearest informer to the left
+    for (let k = 0; k < nodes.length; k++) {
+      if (nodes[k].pos - lastKnew <= rangeKm) learns[k] = true;
+      if (nodes[k].knew) lastKnew = nodes[k].pos;
+    }
+    lastKnew = Infinity;                           // sweep left: nearest informer to the right
+    for (let k = nodes.length - 1; k >= 0; k--) {
+      if (lastKnew - nodes[k].pos <= rangeKm) learns[k] = true;
+      if (nodes[k].knew) lastKnew = nodes[k].pos;
+    }
+    // relay boxes also hear each other (shelters RELAY_LINK_KM apart)
+    const relayKnew = relayInformed.slice();
+    if (relays) {
+      for (let r = 0; r < SHELTERS.length; r++) {
+        const near = [r - 1, r + 1].some((q) => relayKnew[q] && Math.abs(SHELTERS[q] - SHELTERS[r]) <= RELAY_LINK_KM);
+        if (near) relayInformed[r] = true;
+      }
+    }
+    for (let k = 0; k < nodes.length; k++) {
+      const n = nodes[k];
+      if (!learns[k] || n.knew) continue;
+      if (n.r !== undefined) relayInformed[n.r] = true;
+      else {
+        const h = hs[n.i];
+        h.informed = true;
+        h.knewAt = (SPRING - h.pos) * h.dir;   // km still to go to the spring (negative: already past)
+      }
+    }
+
+    let known = 0;
+    for (const h of hs) if (h.informed) known++;
+    share[step] = known / hs.length;
+    if (hist) hist.push({ pos: Float32Array.from(hs, (h) => h.pos), dir: Int8Array.from(hs, (h) => h.dir),
+                          inf: Uint8Array.from(hs, (h) => h.informed), relays: relayInformed.slice() });
+    if (step === STEPS) break;
+
+    // 2. walk
+    const night = hourOfDay >= 20 || hourOfDay < 6;
+    if (hourOfDay < 6.1) for (const h of hs) h.camped = false;   // new day
+    for (let i = 0; i < hs.length; i++) {
+      const h = hs[i];
+      if (night || h.camped || hourOfDay < h.startAt) continue;
+      const before = h.pos;
+      let next = h.pos + h.dir * h.speed * DT;
+      if (hourOfDay >= 17.5) {            // evening: stop at the next shelter
+        const shelter = h.dir > 0 ? SHELTERS.find((s) => s > before - 1e-9) : [...SHELTERS].reverse().find((s) => s < before + 1e-9);
+        if (shelter !== undefined && (next - shelter) * h.dir >= 0) { next = shelter; h.camped = true; }
+      }
+      h.pos = next;
+      // reaching the spring
+      if ((before - SPRING) * (next - SPRING) <= 0 && before !== SPRING && h !== reporter) {
+        arrived++;
+        if (h.informed) { warned++; leadKm.push(h.knewAt ?? 0); }
+      }
+      // leaving the section: a new hiker who hasn't heard anything steps on at that end
+      if (h.pos > L || h.pos < 0) {
+        const fresh = newHiker(rand, h.dir, h.dir > 0 ? 0 : L);
+        fresh.startAt = h.startAt;
+        hs[i] = fresh;
+      }
+    }
+  }
+  leadKm.sort((a, b) => a - b);
+  return {
+    share, hist, arrived, warned,
+    medianLeadKm: leadKm.length ? leadKm[Math.floor(leadKm.length / 2)] : null,
+    t90: (() => { const i = share.findIndex((v) => v >= 0.9); return i < 0 ? null : i * DT; })(),
+  };
+}
+
+// ---- state & controls -------------------------------------------------------------
+const $ = (id) => document.getElementById(id);
+const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+let seed = 7;
+let runs = null;       // {with, without}
+let frame = 0;         // animation step
+let playing = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+function settings() {
+  return { hikers: +$("hikers").value, rangeKm: +$("range").value, noboShare: +$("nobo").value / 100, seed };
+}
+
+function recompute() {
+  const s = settings();
+  const animRelays = $("relays").checked;
+  runs = {
+    with: simulate({ ...s, relays: true, record: animRelays }),
+    without: simulate({ ...s, relays: false, record: !animRelays }),
+  };
+  renderTiles();
+  renderAverages(s);
+  renderChart();
+  renderTable();
+  drawTrail();
+}
+
+function pct(x) { return `${Math.round(x * 100)}%`; }
+function fmtHours(h) { return h === null ? "not within 3 days" : h < 1 ? `${Math.round(h * 60)} min` : `${h.toFixed(1)} h`; }
+function clockText(step) {
+  const total = START_HOUR + step * DT;
+  const day = Math.floor(total / 24) + 1;
+  const h = Math.floor(total % 24), m = Math.round((total % 1) * 60) % 60;
+  return `Day ${day}, ${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")} · ${Math.floor(step * DT)} h after the report`;
+}
+
+function renderTiles() {
+  const w = runs.with, wo = runs.without;
+  const warnedShare = (r) => (r.arrived ? r.warned / r.arrived : 0);
+  const tile = (k, v, s, color) => `<div class="tile"><div class="k">${color ? `<i class="swatch" style="background:${color}"></i>` : ""}${k}</div><div class="v">${v}</div><div class="s">${s}</div></div>`;
+  const lead = (r) => (r.medianLeadKm === null ? "–" : `${Math.round(r.medianLeadKm)} km`);
+  $("tiles").innerHTML =
+    tile("Warned before reaching the spring, with relay boxes", pct(warnedShare(w)),
+         `${w.warned} of ${w.arrived} hikers who got to km 72`, "var(--series-1)") +
+    tile("Warned before reaching the spring, hikers only", pct(warnedShare(wo)),
+         `${wo.warned} of ${wo.arrived} hikers who got to km 72`, "var(--series-2)") +
+    tile("How far ahead they found out (median)", `${lead(w)} <span style="font-size:18px;color:var(--text-muted)">vs ${lead(wo)}</span>`,
+         "with relay boxes vs hikers only: room to fill up at the last water before it") +
+    tile("Time until 90% of hikers know", fmtHours(w.t90), `with relay boxes · hikers only: ${fmtHours(wo.t90)}`);
+}
+
+// The tiles show the run being animated; this line averages many random sets of hikers
+function renderAverages(s) {
+  const N = 20, acc = { ww: 0, wwo: 0, lw: [], lwo: [], tw: [], two: [] };
+  for (let k = 0; k < N; k++) {
+    const opts = { ...s, seed: 1000 + k, record: false };
+    const w = simulate({ ...opts, relays: true }), wo = simulate({ ...opts, relays: false });
+    acc.ww += w.arrived ? w.warned / w.arrived : 0; acc.wwo += wo.arrived ? wo.warned / wo.arrived : 0;
+    if (w.medianLeadKm !== null) acc.lw.push(w.medianLeadKm);
+    if (wo.medianLeadKm !== null) acc.lwo.push(wo.medianLeadKm);
+    acc.tw.push(w.t90 ?? Infinity); acc.two.push(wo.t90 ?? Infinity);
+  }
+  const med = (a) => { const b = [...a].sort((x, y) => x - y); return b[Math.floor(b.length / 2)]; };
+  const hrs = (h) => (h === Infinity ? "over 3 days" : fmtHours(h));
+  $("averages").textContent =
+    `Across ${N} random sets of hikers with these settings: ${pct(acc.ww / N)} warned with relay boxes vs ${pct(acc.wwo / N)} hikers only; ` +
+    `typically ${Math.round(med(acc.lw))} km ahead vs ${Math.round(med(acc.lwo))} km; 90% know after ${hrs(med(acc.tw))} vs ${hrs(med(acc.two))}.`;
+}
+
+// ---- trail animation ------------------------------------------------------------------
+function drawTrail() {
+  const canvas = $("trail");
+  const dpr = window.devicePixelRatio || 1;
+  const W = canvas.clientWidth, H = canvas.clientHeight;
+  if (canvas.width !== Math.round(W * dpr)) { canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr); }
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+
+  const animRelays = $("relays").checked;
+  const run = animRelays ? runs.with : runs.without;
+  const s = run.hist[Math.min(frame, run.hist.length - 1)];
+  $("trail-title").textContent = animRelays ? "The trail, with relay boxes" : "The trail, hikers only";
+  $("clock").textContent = clockText(frame);
+
+  const padL = 16, padR = 16, y0 = H / 2;
+  const x = (km) => padL + (km / L) * (W - padL - padR);
+
+  // night
+  const hourOfDay = (START_HOUR + frame * DT) % 24;
+  if (hourOfDay >= 20 || hourOfDay < 6) { ctx.fillStyle = css("--night"); ctx.fillRect(0, 0, W, H); }
+
+  // trail and km ticks
+  ctx.strokeStyle = css("--trail"); ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(x(0), y0); ctx.lineTo(x(L), y0); ctx.stroke();
+  ctx.fillStyle = css("--text-muted"); ctx.font = "11px system-ui, sans-serif"; ctx.textAlign = "center";
+  for (let km = 0; km <= L; km += 10) {
+    ctx.fillRect(x(km) - 0.5, y0 - 3, 1, 6);
+    ctx.fillText(`${km}`, x(km), H - 6);
+  }
+  ctx.textAlign = "left"; ctx.fillText("km", x(0), H - 18);
+
+  // shelters / relay boxes
+  SHELTERS.forEach((km, r) => {
+    const size = 9;
+    if (animRelays) {
+      ctx.fillStyle = css("--relay");
+      ctx.fillRect(x(km) - size / 2, y0 - size / 2, size, size);
+      if (s.relays[r]) {   // a relay holding the report: ring in the informed colour
+        ctx.strokeStyle = css("--informed"); ctx.lineWidth = 2;
+        ctx.strokeRect(x(km) - size / 2 - 2.5, y0 - size / 2 - 2.5, size + 5, size + 5);
+      }
+    } else {
+      ctx.strokeStyle = css("--trail"); ctx.lineWidth = 1.5;
+      ctx.strokeRect(x(km) - size / 2, y0 - size / 2, size, size);
+    }
+  });
+
+  // the spring
+  ctx.fillStyle = css("--text-primary"); ctx.font = "600 12px system-ui, sans-serif"; ctx.textAlign = "center";
+  ctx.fillText("✕ dry spring", x(SPRING), 14);
+  ctx.strokeStyle = css("--text-muted"); ctx.setLineDash([3, 3]); ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(x(SPRING), 20); ctx.lineTo(x(SPRING), H - 22); ctx.stroke(); ctx.setLineDash([]);
+
+  // hikers: northbound above the trail, southbound below; stacked when camped together
+  const lanes = new Map();
+  const order = Array.from(s.pos.keys()).sort((a, b) => s.inf[a] - s.inf[b]);   // informed drawn on top
+  for (const i of order) {
+    const px = x(s.pos[i]);
+    const key = `${s.dir[i]}:${Math.round(px / 7)}`;
+    const lane = lanes.get(key) || 0;
+    lanes.set(key, lane + 1);
+    const py = y0 - s.dir[i] * (14 + lane * 8);
+    ctx.fillStyle = s.inf[i] ? css("--informed") : css("--uninformed");
+    ctx.beginPath(); ctx.arc(px, py, 3.6, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = css("--surface-1"); ctx.lineWidth = 1; ctx.stroke();
+  }
+  movePlayhead();
+}
+
+// ---- chart ---------------------------------------------------------------------------
+const CH = { padL: 44, padR: 120, padT: 12, padB: 30 };
+let chartGeom = null;
+
+function renderChart() {
+  const svg = $("chart");
+  const W = svg.clientWidth || 800, H = svg.clientHeight || 280;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  const x = (h) => CH.padL + (h / HOURS) * (W - CH.padL - CH.padR);
+  const y = (v) => CH.padT + (1 - v) * (H - CH.padT - CH.padB);
+  chartGeom = { W, H, x, y };
+
+  let out = "";
+  for (const v of [0, 0.25, 0.5, 0.75, 1]) {
+    out += `<line class="gridline" x1="${CH.padL}" x2="${W - CH.padR}" y1="${y(v)}" y2="${y(v)}"/>`;
+    out += `<text class="axis-label" x="${CH.padL - 8}" y="${y(v) + 4}" text-anchor="end">${v * 100}%</text>`;
+  }
+  for (let h = 0; h <= HOURS; h += 12) {
+    out += `<text class="axis-label" x="${x(h)}" y="${H - 8}" text-anchor="middle">${h} h</text>`;
+  }
+  const path = (share) => {
+    let d = "";
+    for (let step = 0; step <= STEPS; step += 10) d += `${d ? "L" : "M"}${x(step * DT).toFixed(1)},${y(share[step]).toFixed(1)}`;
+    return d;
+  };
+  const end = (share) => share[STEPS];
+  out += `<path d="${path(runs.without.share)}" fill="none" stroke="var(--series-2)" stroke-width="2" stroke-dasharray="6 4" stroke-linejoin="round"/>`;
+  out += `<path d="${path(runs.with.share)}" fill="none" stroke="var(--series-1)" stroke-width="2" stroke-linejoin="round"/>`;
+  // direct labels at the line ends, nudged apart if they'd collide
+  let yw = y(end(runs.with.share)), ywo = y(end(runs.without.share));
+  if (Math.abs(yw - ywo) < 16) {   // too close: the higher-or-equal line's label on top
+    const mid = (yw + ywo) / 2, relaysOnTop = yw <= ywo;
+    yw = mid + (relaysOnTop ? -8 : 8);
+    ywo = mid + (relaysOnTop ? 8 : -8);
+  }
+  out += `<text class="direct-label" x="${W - CH.padR + 8}" y="${yw + 4}">with relays ${pct(end(runs.with.share))}</text>`;
+  out += `<text class="direct-label" x="${W - CH.padR + 8}" y="${ywo + 4}">hikers only ${pct(end(runs.without.share))}</text>`;
+  // playhead (the animation's current time) and hover crosshair
+  out += `<line id="playhead" y1="${CH.padT}" y2="${H - CH.padB}" stroke="var(--text-muted)" stroke-width="1" stroke-dasharray="2 3"/>`;
+  out += `<line id="crosshair" y1="${CH.padT}" y2="${H - CH.padB}" stroke="var(--text-secondary)" stroke-width="1" visibility="hidden"/>`;
+  out += `<circle id="hover-with" r="4.5" fill="var(--series-1)" stroke="var(--surface-1)" stroke-width="2" visibility="hidden"/>`;
+  out += `<circle id="hover-without" r="4.5" fill="var(--series-2)" stroke="var(--surface-1)" stroke-width="2" visibility="hidden"/>`;
+  out += `<rect id="hit" x="${CH.padL}" y="${CH.padT}" width="${W - CH.padL - CH.padR}" height="${H - CH.padT - CH.padB}" fill="transparent"/>`;
+  svg.innerHTML = out;
+  movePlayhead();
+
+  const hit = $("hit"), tip = $("tooltip");
+  const hide = () => { ["crosshair", "hover-with", "hover-without"].forEach((id) => $(id).setAttribute("visibility", "hidden")); tip.style.display = "none"; };
+  hit.addEventListener("mouseleave", hide);
+  hit.addEventListener("mousemove", (e) => {
+    const rect = svg.getBoundingClientRect();
+    const px = (e.clientX - rect.left) * (W / rect.width);
+    const h = Math.max(0, Math.min(HOURS, ((px - CH.padL) / (W - CH.padL - CH.padR)) * HOURS));
+    const step = Math.round(h / DT);
+    const vw = runs.with.share[step], vwo = runs.without.share[step];
+    $("crosshair").setAttribute("x1", x(h)); $("crosshair").setAttribute("x2", x(h)); $("crosshair").setAttribute("visibility", "visible");
+    for (const [id, v] of [["hover-with", vw], ["hover-without", vwo]]) {
+      $(id).setAttribute("cx", x(h)); $(id).setAttribute("cy", y(v)); $(id).setAttribute("visibility", "visible");
+    }
+    tip.innerHTML = `<div style="color:var(--text-secondary)">${clockText(step)}</div>
+      <div><i class="swatch" style="background:var(--series-1)"></i>with relays <b>${pct(vw)}</b></div>
+      <div><i class="swatch" style="background:var(--series-2)"></i>hikers only <b>${pct(vwo)}</b></div>`;
+    tip.style.display = "block";
+    const left = (x(h) / W) * rect.width;
+    tip.style.left = `${Math.min(left + 12, rect.width - tip.offsetWidth - 4)}px`;
+    tip.style.top = "8px";
+  });
+}
+
+function movePlayhead() {
+  if (!chartGeom || !$("playhead")) return;
+  const px = chartGeom.x(frame * DT);
+  $("playhead").setAttribute("x1", px); $("playhead").setAttribute("x2", px);
+}
+
+function renderTable() {
+  let html = "<tr><th>Hours after the report</th><th>With relay boxes</th><th>Hikers only</th></tr>";
+  for (let h = 0; h <= HOURS; h += 6) {
+    const step = Math.round(h / DT);
+    html += `<tr><td>${h} h</td><td>${pct(runs.with.share[step])}</td><td>${pct(runs.without.share[step])}</td></tr>`;
+  }
+  $("data-table").innerHTML = html;
+}
+
+// ---- wiring ------------------------------------------------------------------------------
+function bindRange(id, fmt) {
+  const input = $(id), out = $(`${id}-out`);
+  const show = () => { out.textContent = fmt(+input.value); };
+  input.addEventListener("input", show); show();
+  return input;
+}
+bindRange("hikers", (v) => `${v}`).addEventListener("change", () => { frame = 0; recompute(); });
+bindRange("range", (v) => `${v} km`).addEventListener("change", () => { frame = 0; recompute(); });
+bindRange("nobo", (v) => `${v}%`).addEventListener("change", () => { frame = 0; recompute(); });
+bindRange("speed", (v) => `${v} min/frame`);
+$("relays").addEventListener("change", () => recompute());
+$("reroll").addEventListener("click", () => { seed += 1; frame = 0; recompute(); });
+$("play").addEventListener("click", () => {
+  playing = !playing;
+  $("play").textContent = playing ? "Pause" : "Play";
+  if (playing && frame >= STEPS) frame = 0;
+});
+$("play").textContent = playing ? "Pause" : "Play";
+
+let last = 0;
+function tick(t) {
+  if (playing && t - last > 40) {      // ~25 frames a second
+    last = t;
+    frame = Math.min(STEPS, frame + +$("speed").value);
+    if (frame >= STEPS) { playing = false; $("play").textContent = "Replay"; }
+    drawTrail();
+  }
+  requestAnimationFrame(tick);
+}
+window.addEventListener("resize", () => { renderChart(); drawTrail(); });
+window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { renderChart(); drawTrail(); });
+
+recompute();
+requestAnimationFrame(tick);
+</script>
+</body>
+</html>
