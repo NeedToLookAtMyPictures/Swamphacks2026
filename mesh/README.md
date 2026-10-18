@@ -14,8 +14,11 @@ mesh/
     node.py          duty-cycled discovery, beacons, one session at a time, cooldowns
     link.py          Link interface (ESP-NOW now, LoRa later)
     espnow_serial.py Link over USB serial to the bridge firmware (needs pyserial)
+    heltec_serial.py both radios of a Heltec V3 (firmware/heltec_bridge); lora.py: LoRa settings, airtime
+    radio.py         open_board() and build_node(radio='auto' | 'lora' | 'espnow')
     sim.py           simulated radio + virtual clock for tests/demos
   firmware/espnow_bridge/  Arduino sketch for the ESP32 bridge
+  firmware/heltec_bridge/  Arduino sketch for a Heltec LoRa 32 V3 (LoRa + ESP-NOW), see docs/lora.md
   examples/run_node.py     run a node against real hardware
   tests/                   python -m unittest discover -s tests
 ```
@@ -86,10 +89,12 @@ tombstoned. Messages and tombstones expire after 31 days. See
   time in the cutoff. The app's own `/api/sync?since=` still counts only
   creation time.
 
-## Toward LoRa
+## LoRa + ESP-NOW (Heltec LoRa 32 V3)
 
-Everything above `Link` is radio-agnostic: frames are sized from `link.mtu`
-(tests run at a 100-byte MTU), and receivers identify senders by the id in the
-header, not by link address. A LoRa link needs `send` (broadcast-only is fine),
-`poll`, `set_radio` and a much slower `Config` (longer `rto`, `idle_timeout`,
-`hello_interval`, smaller `window_frames`).
+Flash `firmware/heltec_bridge` and add `--board heltec` to any example (or
+`--mesh-board heltec` to the app). Discovery and handshakes go over LoRa; the
+exchange moves to ESP-NOW when the two hikers are within 60 m, and otherwise
+runs over LoRa with positions first. To test one radio on its own, pin it:
+`--radio lora` or `--radio espnow` (app: `--mesh-radio`). With plain ESP32s
+in the same test, add `--multiple-boards` to the Heltecs: they then also try
+ESP-NOW whenever LoRa isn't producing syncs. See [docs/lora.md](docs/lora.md).

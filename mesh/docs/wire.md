@@ -27,9 +27,9 @@ covers every frame.
 
 | Type | Value | Reliable? | Payload | Sent by |
 |---|---|---|---|---|
-| BEACON | 1 | no (broadcast) | `version u8, last_server_sync u32, digest 8B` | Node, during windows |
-| HELLO | 2 | no (retried by session) | `version u8, last_server_sync u32` | Initiator |
-| HELLO_ACK | 3 | no (re-sent if HELLO repeats) | `version u8, last_server_sync u32` | Responder |
+| BEACON | 1 | no (broadcast) | `version u8, last_server_sync u32, data_digest 8B, position_digest 8B` | Node, during windows |
+| HELLO | 2 | no (retried by session) | `version u8, last_server_sync u32, target_id u32` | Initiator |
+| HELLO_ACK | 3 | no (re-sent if HELLO repeats) | `version u8, last_server_sync u32, target_id u32` | Responder |
 | ACK | 4 | no | `next_expected u32, sack_bitmap u32` | Both, for every reliable frame received |
 | INV | 5 | **yes** | repeated `id 8B, kind u8, created u32` (13 B each) | Both |
 | WANT | 6 | **yes** | repeated `id 8B` | Both |
@@ -89,8 +89,11 @@ Limits that follow from the field sizes:
 
 ## Versioning
 
-`PROTOCOL_VERSION = 2` appears only in BEACON and HELLO/HELLO_ACK. Version 2
-changed the records to mirror the app's tables and added the CRC32 to DATA. Nodes ignore
+`PROTOCOL_VERSION = 3` appears only in BEACON and HELLO/HELLO_ACK. Version 2
+changed the records to mirror the app's tables and added the CRC32 to DATA.
+Version 3 split the beacon digest into data and positions, and added the
+target id to HELLO/HELLO_ACK: on LoRa every frame is a broadcast, so without it
+every idle device that heard a HELLO became a responder. Nodes ignore
 beacons and HELLOs with a different version, so devices on mismatched versions
 just never pair. The version check covers the HELLO a responder receives, but
 the initiator doesn't check the version in HELLO_ACK.

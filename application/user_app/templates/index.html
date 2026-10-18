@@ -12,7 +12,7 @@
     <button class="tab active" data-tab="messages">Messages</button>
     <button class="tab" data-tab="map">Map</button>
     <button class="tab" data-tab="explore">Explore</button>
-    <button class="tab" data-tab="debug">Debug</button>
+    <button class="tab" data-tab="debug">Debug <span id="mesh-badge" class="mesh-badge off" title="Mesh radio"></span></button>
   </nav>
 
   <main>
@@ -107,6 +107,29 @@
     </section>
 
     <section id="debug" class="panel">
+      <div id="mesh-status">
+        <div id="mesh-off" class="mesh-card" hidden>
+          <h3>Mesh radio is off</h3>
+          <p class="mesh-note">This app was started without a board. Start it with
+            <code>--mesh-port</code> (and <code>--mesh-board heltec</code> for LoRa) to sync with
+            nearby hikers without internet.</p>
+        </div>
+        <div id="mesh-on" hidden>
+          <div class="mesh-card">
+            <h3>This device</h3>
+            <div id="mesh-board"></div>
+          </div>
+          <div class="mesh-card">
+            <h3>Nearby <span id="mesh-nearby-count" class="mesh-note"></span></h3>
+            <div id="mesh-session"></div>
+            <div id="mesh-peers"></div>
+          </div>
+          <div class="mesh-card">
+            <h3>Recent activity</h3>
+            <div id="mesh-events"></div>
+          </div>
+        </div>
+      </div>
       <div class="debug-toolbar">
         <strong>Local database</strong>
         <button id="debug-refresh">Refresh</button>
@@ -129,6 +152,7 @@
   <script src="{{ url_for('static', filename='locale-sheet.js') }}"></script>
   <script src="{{ url_for('static', filename='trails.js') }}"></script>
   <script src="{{ url_for('static', filename='location.js') }}"></script>
+  <script src="{{ url_for('static', filename='mesh.js') }}"></script>
   <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
 </html>

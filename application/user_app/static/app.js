@@ -48,7 +48,10 @@ function showTab(name) {
   }
   if (name === "explore") loadTrails();
   if (name === "messages") loadMessages();
-  if (name === "debug") loadDebug();
+  if (name === "debug") {
+    loadDebug();
+    loadMesh();  // the mesh status sits at the top of the Debug tab
+  }
 }
 
 document.querySelectorAll(".tab").forEach((t) =>

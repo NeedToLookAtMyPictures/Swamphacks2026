@@ -157,7 +157,7 @@ def sync_once(db, server_url, global_db=None, maps_dir=None):
     if maps_dir is not None:
         request["maps"] = map_versions(maps_dir)
     result = call(server_url, "/api/sync", request)
-    merged = db.merge(result["records"])
+    merged = db.merge(result["records"], via="server")
     if global_db is not None and result.get("global"):
         loaded = global_db.load(result["global"])
         print(f"Got the server's global data: {loaded}")

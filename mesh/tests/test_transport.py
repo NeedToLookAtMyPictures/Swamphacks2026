@@ -163,6 +163,7 @@ class Selection(unittest.TestCase):
         self.assertEqual(self.find_board(("/dev/ttyUSB0", 0x1A86)), "/dev/ttyUSB0")
         # a native-USB board wins over an unrelated bridge chip
         self.assertEqual(self.find_board(("/dev/ttyUSB0", 0x0403), ("/dev/ttyACM0", 0x303A)), "/dev/ttyACM0")
+        self.assertEqual(self.find_board(("/dev/ttyUSB0", 0x10C4), ("/dev/ttyACM0", 0x239A)), "/dev/ttyACM0")
         with self.assertRaises(transport.TransportError):
             self.find_board(("/dev/ttyS0", None))
         with self.assertRaises(transport.TransportError):

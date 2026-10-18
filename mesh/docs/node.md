@@ -100,13 +100,21 @@ else:         drop it
 
 ### When does a beacon start a session?
 
-All of these must hold, checked in this order:
+A beacon makes its sender a **candidate** if all of these hold:
 1. The beacon's version equals `PROTOCOL_VERSION`.
 2. **Our id is lower than the sender's.** Only one side starts, so the two
    never send HELLO at the same time.
-3. `now >= next_allowed[peer]` (cooldown or backoff, below).
-4. **Its digest differs from ours** (identical sets mean nothing to exchange).
-   Checked last because computing our digest reads the app's database.
+3. Either the **data digest** (everything but positions) differs and
+   `now >= next_data[peer]`, or the **position digest** differs and
+   `now >= next_pos[peer]` (cooldowns and backoff, below). Identical sets mean
+   nothing to exchange. The time checks run first, because computing our
+   digests reads the app's database.
+
+`select_delay` (1 s) after the first candidate, but no later than the end of
+the window's beacons, the node picks one of the candidates heard in this window:
+**least recently synced first** (never synced before all others), then peers
+with non-position changes, then at random. Then it sends HELLO. That way a
+group of hikers all get paired over time, rather than the same two re-syncing.
 
 The higher-id device never initiates. It waits for the lower-id device's
 HELLO. Both send beacons in every window, so the lower-id device normally
@@ -114,7 +122,8 @@ hears one.
 
 ### When is a HELLO accepted?
 
-Whenever we're idle and the version matches. **The responder does not check its
+Whenever we're idle, the version matches, and the HELLO's **target id is
+ours** (on LoRa every device hears every HELLO). **The responder does not check its
 own cooldown for that peer**; the cooldown is enforced only by the initiator,
 which is enough because only the initiator starts sessions.
 
@@ -127,8 +136,14 @@ which is enough because only the initiator starts sessions.
 
 `_end_session(now)`:
 1. `link.set_partner(None)`.
-2. `next_allowed[peer] = now + cooldown` (120 s) on success, or
-   `now + retry_backoff` (10 s) on failure.
+2. On success: `next_data = now + cooldown` (10 s), `next_pos = now +
+   location_cooldown` (10 s; TODO: 10 min), and remember `(INV time, ids the
+   peer sent us)`. The next session with this peer then lists only records
+   created or received after that time, minus those ids (a **change-only
+   INV**). If a change-only session moves nothing, even though the digests
+   differed, the next one lists everything again.
+   On failure: back off `retry_backoff × 2^(failures in a row − 1)`, capped
+   at `max_backoff` (10, 20, 40 … 300 s).
 3. Keep the session lingering for `linger` (3 s), so it can still ACK the peer's last frames.
 4. Call `on_session_end(session)`.
 
@@ -142,13 +157,18 @@ which is enough because only the initiator starts sessions.
 | `beacons_per_window` | 2 | |
 | `always_on` | False | Demo mode |
 | `beacon_interval` | 1 s | Beacon spacing in demo mode |
-| `cooldown` | 120 s | Gap after a successful sync before re-syncing with the same peer |
-| `retry_backoff` | 10 s | Gap after a failed sync |
+| `cooldown` | 10 s | After a successful sync, gap before re-syncing with that peer if anything but positions differs |
+| `location_cooldown` | 10 s | Same, if only positions differ. TODO: 10 min |
+| `select_delay` | 1 s | Collect beacons this long before picking a peer |
+| `retry_backoff` / `max_backoff` | 10 s / 300 s | Gap after a failed sync, doubling per failure in a row |
 | `hello_interval` / `hello_retries` | 0.3 s / 10 | Handshake retry pacing |
 | `rto` / `max_retries` | 0.25 s / 12 | See [reliable.md](reliable.md) |
 | `window_frames` | 16 | Max unacked frames in flight |
 | `idle_timeout` | 4 s | Peer silent this long: session fails |
 | `linger` | 3 s | Keep ACKing a finished session's frames this long |
+| `ack_delay` / `ack_max` | 0 / 0 | Delayed ACKs (LoRa); 0 = ACK every frame at once |
+
+`Config.lora(params)` derives LoRa values from airtime; see [lora.md](lora.md).
 | `accept_kinds` | all | Kinds we request from peers (e.g. leave GEOLOCATION out to save airtime) |
 
 ## Assumptions

@@ -48,6 +48,7 @@ python main.py --no-lan              # don't look for a server on the wifi
 python main.py --mesh-port /dev/ttyACM0 --mesh-demo   # also sync over an ESP32 (see ../../mesh)
 python main.py --server "" --no-lan --mesh-port /dev/ttyACM0 --mesh-demo   # mesh only, to test it
 python main.py --phone --mesh-demo   # Android (Termux), ESP32 plugged into the phone (see below)
+python main.py --mesh-port auto --mesh-board heltec --multiple-boards --mesh-demo   # Heltec, also syncs with plain ESP32s
 python main.py --log-requests        # also log every successful GET (hidden: the page polls)
 ```
 
@@ -242,6 +243,10 @@ offline on devices with GPS (phones); laptops without GPS usually need internet
 to locate themselves. Browsers only allow geolocation on `localhost` or HTTPS,
 so opening the app from another device over plain `http://<lan-ip>` won't report
 a position; start the server with `--https` for that (see Raspberry Pi above). Updates pause while the tab is hidden or the phone is locked.
+
+If the first try fails, the page checks why (secure page, permission, whether the
+phone has any position at all, device set up) and shows what to do in the Debug
+tab's `gps` section, which also has a **Run GPS check** button.
 
 ## Tabs
 

@@ -39,7 +39,7 @@ All through the app's public `Database` API:
 | `has(id)` | `export()` | True if we hold the record **or** a tombstone we hold has killed it |
 | `get(id)` | `export()` | The record, to send it |
 | `put(record)` | `merge()` | Hand a peer's record to the app; True if anything changed |
-| `digest()` | `export()` | XOR of the ids of everything relayable |
+| `digests()` | `export()` | XOR of the ids of everything relayable: (all but positions, positions). `digest()` XORs the two. |
 | `last_server_sync` | `get_device()` / `update_device()` | From the app's `device_info` |
 | `mesh_id` | `device_id` | The u32 used on the air (see below) |
 | `device_id` | `device_id` | The app's device id string |
@@ -67,6 +67,11 @@ cutoff is 2 days ago. Both got everything older from the server. After that:
 "Received" is the app's local `time_received` column, set whenever a row is
 stored (from a peer, the server, or written on this device). `export()`
 doesn't include it, so `AppStore` reads it with `list()`.
+
+`put()` also tells the app which radio a row came over (`Link.radio`: "LoRa"
+or "ESP-NOW"). The app stores it in the local `received_via` column, next to
+"server" and "sync API" for its other ways in. Rows made on this device have
+none. It's shown in the Debug tab only and never shared.
 
 **This differs from the app's own `GET /api/sync?since=`**, which filters on
 `time_created` only. The mesh doesn't use that endpoint, but anything else that

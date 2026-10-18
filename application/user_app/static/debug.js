@@ -14,6 +14,8 @@ function el(tag, text, className) {
 }
 
 function formatValue(key, value) {
+  // received_via: how the row got here (server, LoRa, ESP-NOW, sync API); never shared
+  if (key === "received_via") return value || "this device";
   if (value === null || value === undefined) return "—";
   if (TIME_FIELDS.has(key) && typeof value === "number") {
     return new Date(value * 1000).toLocaleString();
@@ -45,6 +47,55 @@ function renderTable(title, rows) {
   wrap.appendChild(table);
   section.appendChild(wrap);
   return section;
+}
+
+let gpsPath = null;  // positionPath() as of the last Refresh
+
+function renderGps() {
+  // This device's GPS, from location.js: is it getting fixes, where the position
+  // got to (database, server), and if something fails, why
+  const section = el("div", undefined, "debug-section");
+  section.id = "gps-debug";
+  section.appendChild(el("h3", "gps"));
+  const rows = [
+    ["attempts / fixes", `${gpsDebug.attempts} / ${gpsDebug.fixes}`],
+    ["from the phone (last fix)", gpsDebug.last_fix ? `${formatValue("time_created", gpsDebug.last_fix.time)}: ` +
+      `${gpsDebug.last_fix.latitude.toFixed(6)}, ${gpsDebug.last_fix.longitude.toFixed(6)} ` +
+      `±${gpsDebug.last_fix.accuracy_m} m` : "none yet"],
+    ["last error", gpsDebug.last_error ? `${formatValue("time_created", gpsDebug.last_error.time)}: ` +
+      `${gpsDebug.last_error.error} ${gpsDebug.last_error.message}` : "none"],
+    ["last save", gpsDebug.last_save || "—"],
+    ...(gpsPath ? gpsPath.rows : []),
+    ...(gpsPath ? gpsPath.advice.map((a, i) => [i === 0 ? "problem" : "", a]) : []),
+  ];
+  const check = gpsDebug.check;
+  if (check) {
+    rows.push(["check", check.running ? "running…" : `ran ${formatValue("time_created", check.time)}`]);
+    check.findings.forEach(([k, v]) => rows.push([k, v]));
+    check.advice.forEach((a, i) => rows.push([i === 0 ? "what to do" : "", a]));
+  }
+  const table = el("table", undefined, "debug-kv");
+  const body = table.createTBody();
+  rows.forEach(([k, v]) => {
+    const tr = body.insertRow();
+    tr.appendChild(el("th", k));
+    tr.insertCell().textContent = v;
+  });
+  const wrap = el("div", undefined, "debug-table-wrap");
+  wrap.appendChild(table);
+  const button = el("button", check && check.running ? "Checking…" : "Run GPS check");
+  button.disabled = Boolean(check && check.running);
+  button.addEventListener("click", () => {
+    runGpsCheck(gpsDebug.fixes === 0 ? gpsDebug.last_error : null);  // why the last try failed, if none worked
+    refreshGpsDebug();
+  });
+  section.append(wrap, button);
+  return section;
+}
+
+function refreshGpsDebug() {
+  const old = document.getElementById("gps-debug");
+  if (old) old.replaceWith(renderGps());
 }
 
 function renderDeviceSetup(content, server) {
@@ -97,8 +148,10 @@ async function loadDebug() {
       Object.values(GLOBAL_DEBUG_TABLES).map((url) => fetch(url).then((r) => r.json())));
 
     content.replaceChildren();
-    if (deviceRes.ok) {
-      content.appendChild(renderTable("device_info", [await deviceRes.json()]));
+    const device = deviceRes.ok ? await deviceRes.json() : null;
+    gpsPath = positionPath(device, server, tables[DEBUG_TABLES.indexOf("geolocations")]);
+    if (device) {
+      content.appendChild(renderTable("device_info", [device]));
     } else {
       renderDeviceSetup(content, server);
     }
@@ -113,6 +166,8 @@ async function loadDebug() {
         : globalTables[i];
       content.appendChild(renderTable(t, Array.isArray(rows) ? rows : [rows]));
     });
+    content.appendChild(el("h2", "This device's GPS", "debug-db-title"));
+    content.appendChild(renderGps());
     status.textContent = `Updated ${new Date().toLocaleTimeString()}`;
   } catch (err) {
     status.textContent = `Error: ${err.message}`;

@@ -21,6 +21,7 @@ class RxFrame:
 
 class Link(ABC):
     mtu: int = 250  # max frame size in bytes, including the protocol header
+    radio: str = "ESP-NOW"  # shown to the user as how a record arrived (the app's received_via)
 
     @abstractmethod
     def send(self, payload: bytes, dest: bytes | None = None) -> None:

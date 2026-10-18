@@ -127,6 +127,8 @@ function renderLocaleComments(comments, me) {
     head.append(sheetEl("strong", isMe ? `${c.sender} (you)` : c.sender),
                 sheetEl("span", `${timeAgo(c.time_created)} · ${new Date(c.time_created * 1000).toLocaleString()}`));
     card.append(head, sheetEl("div", c.comment, "locale-comment-body"));
+    const via = arrivalNote(c);  // how it got here (mesh.js); nothing for comments written here
+    if (via) card.appendChild(via);
     return card;
   }));
 }
