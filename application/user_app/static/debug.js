@@ -142,7 +142,7 @@ async function loadDebug() {
     const globalTables = await Promise.all(
       Object.values(GLOBAL_DEBUG_TABLES).map((url) => fetch(url).then((r) => r.json())));
 
-    content.replaceChildren(renderGps());
+    content.replaceChildren();
     if (deviceRes.ok) {
       content.appendChild(renderTable("device_info", [await deviceRes.json()]));
     } else {
@@ -159,6 +159,8 @@ async function loadDebug() {
         : globalTables[i];
       content.appendChild(renderTable(t, Array.isArray(rows) ? rows : [rows]));
     });
+    content.appendChild(el("h2", "This device's GPS", "debug-db-title"));
+    content.appendChild(renderGps());
     status.textContent = `Updated ${new Date().toLocaleTimeString()}`;
   } catch (err) {
     status.textContent = `Error: ${err.message}`;
