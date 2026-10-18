@@ -142,6 +142,7 @@
   <script>
     window.MAPS = {{ maps | tojson }};
     window.DEFAULT_MAP = {{ default_map | tojson }};
+    window.PHONE = {{ phone | tojson }};
   </script>
   <script src="{{ url_for('static', filename='vendor/leaflet/leaflet.js') }}"></script>
   <script src="{{ url_for('static', filename='vendor/protomaps-leaflet/protomaps-leaflet.js') }}"></script>
