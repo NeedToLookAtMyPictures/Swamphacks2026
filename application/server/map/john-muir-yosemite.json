@@ -1,0 +1,17 @@
+{
+  "name": "John Muir Trail: Yosemite Valley section",
+  "source": "https://build.protomaps.com/20261017.pmtiles",
+  "bbox": [
+    -119.6154,
+    37.6769,
+    -119.3537,
+    37.9009
+  ],
+  "center": [
+    37.7889,
+    -119.48455
+  ],
+  "min_zoom": 8,
+  "max_zoom": 15,
+  "trail": "trail-john-muir-yosemite"
+}
