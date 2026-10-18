@@ -6,6 +6,9 @@ On a Heltec board, --radio picks the radios:
     --radio lora     LoRa only, at any distance (test LoRa with the boards side by side)
     --radio espnow   ESP-NOW only
 
+Add --multiple-boards (Heltec, --radio auto) when plain ESP32s are in the test too:
+whenever LoRa isn't producing syncs, the Heltec also discovers over ESP-NOW.
+
 The node syncs the user app's database (application/user_app/data/user.db by
 default), so run it next to the app. Set the device up once in the app first
 (POST /api/device), or pass --name to create it here.
@@ -81,6 +84,9 @@ def main():
     ap.add_argument("--radio", choices=RADIOS, default="auto",
                     help="heltec only. auto: LoRa, switching to ESP-NOW within 60 m; lora / espnow: that radio only")
     ap.add_argument("--sf", type=int, default=7, help="LoRa spreading factor 7-12 (all boards must match)")
+    ap.add_argument("--multiple-boards", action="store_true",
+                    help="heltec, radio auto: also sync with plain ESP32s (espnow_bridge) over ESP-NOW "
+                         "whenever LoRa isn't producing syncs")
     ap.add_argument("--verbose", action="store_true", help="print every frame sent and received")
     args = ap.parse_args()
 
@@ -105,8 +111,13 @@ def main():
         board = open_board(args.board, args.port, sf=args.sf)
     except TransportError as e:
         sys.exit(f"can't open the board: {e}")
-    node = build_node(board, store, radio=args.radio, config=dict(always_on=args.demo), on_record=on_record,
-                      on_delivered=on_delivered, on_session_end=on_end)
+    try:
+        node = build_node(board, store, radio=args.radio, config=dict(always_on=args.demo),
+                          multiple_boards=args.multiple_boards, on_record=on_record, on_delivered=on_delivered,
+                          on_session_end=on_end)
+    except ValueError as e:
+        board.close()
+        sys.exit(str(e))
     if args.verbose:
         trace(node.link)
         if node.fast_link is not None:

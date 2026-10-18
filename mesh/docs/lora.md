@@ -31,6 +31,36 @@ talk directly to each other. It is not LoRaWAN, which needs gateways.
 All boards in a test should use the same mode. An `auto` board and a `lora`
 board still sync over LoRa: the `lora` board never offers ESP-NOW.
 
+A Heltec in `auto` and a plain ESP32 (espnow_bridge) never sync: the Heltec
+discovers over LoRa only. Add `--multiple-boards` to the Heltecs for that (below).
+
+## Mixed boards (`--multiple-boards`)
+
+For tests with Heltecs and plain ESP32s together. Heltec, `auto` mode only
+(`Config.espnow_fallback`); the plain ESP32s need nothing new.
+
+1. **LoRa first.** Discovery, the handshake and the 60 m switch work exactly as
+   above, for every peer heard on LoRa.
+2. **ESP-NOW when LoRa isn't working.** While no exchange found over LoRa has
+   succeeded within the last discovery period (20 s; with `--demo`, the last 3
+   beacon intervals), the Heltec also turns ESP-NOW on during discovery and
+   sends each beacon on both radios. So with a plain ESP32 nearby, ESP-NOW is
+   tried at least every other window, even while other Heltecs keep syncing over LoRa.
+3. **Which radio an exchange uses.** A peer heard only on ESP-NOW (a plain ESP32,
+   or a Heltec whose LoRa doesn't reach) gets an exchange that runs entirely over
+   ESP-NOW, handshake included. A peer heard on both uses LoRa, unless the last
+   LoRa exchange with it failed: then the next try is over ESP-NOW, and the one
+   after that is LoRa's again.
+
+Costs: the ESP-NOW radio is on in discovery windows where LoRa found nothing
+(2 s every 20 s), and the 60 m switch only applies to peers heard on LoRa.
+
+```bash
+python examples/run_node.py --board heltec --multiple-boards --name alice --demo   # Heltec
+python examples/run_node.py --name bob --demo                                       # plain ESP32
+python main.py --mesh-port auto --mesh-board heltec --multiple-boards --mesh-demo  # the app, on the Heltec
+```
+
 ## The 60 m switch (`auto`)
 
 1. Beacons and HELLO / HELLO_ACK always go over LoRa. HELLO and HELLO_ACK carry

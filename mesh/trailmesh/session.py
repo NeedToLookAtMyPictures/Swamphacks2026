@@ -93,6 +93,7 @@ class Session:
         self.hello_info = hello_info  # (lat * 1e7, lon * 1e7, HELLO_* flags) for our HELLO / HELLO_ACK
         self.peer_position: tuple[float, float] | None = None  # from the peer's HELLO / HELLO_ACK
         self.fast = False  # set by the Node: after the handshake, frames go over ESP-NOW
+        self.espnow_only = False  # set by the Node: the handshake went over ESP-NOW too (espnow_fallback)
         self._ack_first: float | None = None  # first reliable frame not yet acked (delayed ACKs)
         self._ack_last = 0.0
 

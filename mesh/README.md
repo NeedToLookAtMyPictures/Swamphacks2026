@@ -95,5 +95,6 @@ Flash `firmware/heltec_bridge` and add `--board heltec` to any example (or
 `--mesh-board heltec` to the app). Discovery and handshakes go over LoRa; the
 exchange moves to ESP-NOW when the two hikers are within 60 m, and otherwise
 runs over LoRa with positions first. To test one radio on its own, pin it:
-`--radio lora` or `--radio espnow` (app: `--mesh-radio`). See
-[docs/lora.md](docs/lora.md).
+`--radio lora` or `--radio espnow` (app: `--mesh-radio`). With plain ESP32s
+in the same test, add `--multiple-boards` to the Heltecs: they then also try
+ESP-NOW whenever LoRa isn't producing syncs. See [docs/lora.md](docs/lora.md).
