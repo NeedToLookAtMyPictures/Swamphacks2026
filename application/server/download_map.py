@@ -1,7 +1,7 @@
 """Download the offline map tiles for a trail, ready to put on the server.
 
 Run this while you have internet:
-    python download_map.py --trail trail-john-muir     # one of the server's trails, by id
+    python download_map.py --trail trail-john-muir-yosemite   # one of the server's trails, by id
     python download_map.py --gpx some_trail.gpx
     python download_map.py --place "Gainesville to Hawthorne, Florida"
     python download_map.py --bbox -82.42 29.56 -82.05 29.73 --name "Gainesville to Hawthorne"
@@ -96,7 +96,7 @@ def slug(name):
 def main():
     parser = argparse.ArgumentParser(description="Download offline map tiles for the server")
     area = parser.add_mutually_exclusive_group()
-    area.add_argument("--trail", metavar="ID", help="one of the server's trails, e.g. trail-john-muir")
+    area.add_argument("--trail", metavar="ID", help="one of the server's trails, e.g. trail-john-muir-yosemite")
     area.add_argument("--gpx", type=Path, help="a trail's GPX file")
     add_area_arguments(parser)
     parser.add_argument("--name", help="the map's name (default: the trail's name, or the place)")

@@ -145,7 +145,9 @@ The server keeps the master copy of the global data: the water sources,
 campsites and trails everyone sees on the map. It lives in `data/global.db`, next
 to `server.db`. On first start it's filled from
 `global/global_data.json`, with the trails' GPX files in `global/trails/`: the
-Gainesville-Hawthorne Trail and the John Muir Trail (`GLOBAL_SEED` picks
+Gainesville-Hawthorne Trail and the first 29.9 km of the John Muir Trail, from
+Yosemite Valley (`John_Muir_Trail_Yosemite_Valley.gpx`, cut from the whole
+trail in `John_Muir_Trail.gpx` so its map is about 500 tiles; `GLOBAL_SEED` picks
 another file). To add a trail, put its GPX in `global/trails/` and add an entry
 for it to `global_data.json`. A server that has already started keeps its old
 copy; load the file again to update it (devices get it on their next sync):
@@ -180,9 +182,9 @@ To change it, download a new one with `download_map.py` (needs internet), copy
 it into `map/` and restart the server:
 
 ```bash
-python download_map.py --trail trail-john-muir   # around one of the server's trails
+python download_map.py --trail trail-john-muir-yosemite   # around one of the server's trails (499 tiles)
 python download_map.py --gpx some_trail.gpx       # or a GPX file, a --place or a --bbox
-cp downloads/john-muir-trail/map.* map/
+cp downloads/john-muir-trail-yosemite-valley-section/map.* map/
 ```
 
 It saves `map.pmtiles` and `map.json` in `downloads/<name>/` (git-ignored), so
@@ -191,8 +193,8 @@ you can check the size first; `--out map` writes straight into `map/`. With
 `data/global.db`, or from `global_data.json` if the server hasn't started yet)
 or `--gpx` the map covers the trail plus `--margin-km` (5). Up to `--full-zoom`
 (11) it has the whole area; above that only tiles within `--corridor-km` (3) of
-the trail, so a long trail stays small (the John Muir Trail is about 4,100
-tiles instead of 27,000). The server has one map at a time, for every device.
+the trail, so a long trail stays small (the whole John Muir Trail would be about
+4,100 tiles instead of 27,000; the Yosemite Valley section is 499). The server has one map at a time, for every device.
 
 ## Relaying
 

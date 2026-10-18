@@ -110,7 +110,7 @@ class ServerSyncTest(unittest.TestCase):
     def test_server_starts_with_the_sample_global_data(self):
         data = self.client.get("/api/global").json
         self.assertEqual(len(data["locales"]), 10)
-        self.assertEqual([t["id"] for t in data["trails"]], ["trail-gainesville-hawthorne", "trail-john-muir"])
+        self.assertEqual([t["id"] for t in data["trails"]], ["trail-gainesville-hawthorne", "trail-john-muir-yosemite"])
         self.assertTrue(data["trails"][0]["gpx"].lstrip().startswith("<?xml"))
         self.assertEqual(len(self.client.get("/api/global_locales").json), 10)
         trail = self.client.get("/api/global_trails").json[0]
