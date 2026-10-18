@@ -58,7 +58,8 @@ function renderGps() {
   section.id = "gps-debug";
   section.appendChild(el("h3", "gps"));
   const rows = [
-    ["attempts / fixes", `${gpsDebug.attempts} / ${gpsDebug.fixes}`],
+    ["watching since / fixes", `${gpsDebug.watching_since ? formatValue("time_created", gpsDebug.watching_since)
+      : "not watching"} / ${gpsDebug.fixes}`],
     ["from the phone (last fix)", gpsDebug.last_fix ? `${formatValue("time_created", gpsDebug.last_fix.time)}: ` +
       `${gpsDebug.last_fix.latitude.toFixed(6)}, ${gpsDebug.last_fix.longitude.toFixed(6)} ` +
       `±${gpsDebug.last_fix.accuracy_m} m` : "none yet"],
