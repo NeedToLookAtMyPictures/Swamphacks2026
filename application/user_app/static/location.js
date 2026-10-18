@@ -7,7 +7,7 @@
 // on another device (e.g. a Raspberry Pi over Bluetooth), start it with --https.
 //
 // If the first try fails, runGpsCheck() works out why. Its findings show in the
-// Debug tab (gpsDebug), in a banner, and in the terminal running main.py.
+// Debug tab's gps section (gpsDebug).
 
 const LOCATION_INTERVAL_MS = 60 * 1000;
 const LOCATION_OPTIONS = {
@@ -25,7 +25,7 @@ const gpsDebug = {
   attempts: 0,
   fixes: 0,
   last_fix: null,    // {time, latitude, longitude, accuracy_m}
-  last_error: null,  // {time, error, message}
+  last_error: null,  // {time, code, error, message}
   last_save: null,   // what PUT /api/location answered
   check: null,       // runGpsCheck() result: {time, running, findings: [[name, value]], advice: [...]}
 };
@@ -56,7 +56,8 @@ async function reportLocation() {
   try {
     pos = await getPosition(LOCATION_OPTIONS);
   } catch (err) {
-    gpsDebug.last_error = { time: Date.now() / 1000, error: GEO_ERRORS[err.code] || "error", message: err.message };
+    gpsDebug.last_error = { time: Date.now() / 1000, code: err.code, error: GEO_ERRORS[err.code] || "error",
+                            message: err.message };
     console.warn("geolocation error:", err.message);
     if (gpsDebug.fixes === 0 && gpsDebug.check === null) runGpsCheck(err);  // first try failed
     return;
@@ -64,7 +65,6 @@ async function reportLocation() {
   gpsDebug.fixes += 1;
   gpsDebug.last_fix = { time: Date.now() / 1000, latitude: pos.coords.latitude,
                         longitude: pos.coords.longitude, accuracy_m: Math.round(pos.coords.accuracy) };
-  hideGpsBanner();
   sendLocation(pos).catch((err) => {
     gpsDebug.last_save = `failed: ${err.message}`;
     console.warn("location update failed:", err);
@@ -73,7 +73,7 @@ async function reportLocation() {
 
 // Why doesn't the position work? Each finding is [what was checked, result];
 // advice lists what to do, most likely cause first.
-async function runGpsCheck(firstError) {
+async function runGpsCheck(lastError) {
   const findings = [];
   const advice = [];
   gpsDebug.check = { time: Date.now() / 1000, running: true, findings, advice };
@@ -86,7 +86,7 @@ async function runGpsCheck(firstError) {
   }
   const available = "geolocation" in navigator;
   findings.push(["browser has geolocation", available ? "yes" : "NO"]);
-  if (firstError) findings.push(["first try", describeError(firstError)]);
+  if (lastError) findings.push(["error checked", describeError(lastError)]);
 
   let permission = "unknown";
   try {
@@ -117,17 +117,17 @@ async function runGpsCheck(firstError) {
   }
 
   if (window.isSecureContext && available) {
-    const denied = permission === "denied" || (firstError && firstError.code === 1);
+    const denied = permission === "denied" || (lastError && lastError.code === 1);
     if (denied) {
       advice.push("Location permission is blocked. Allow it in the browser's site settings for this page, " +
                   "and in Android Settings > Apps > (browser) > Permissions > Location.");
-    } else if (firstError && firstError.code === 3) {
+    } else if (lastError && lastError.code === 3) {
       advice.push(anyPosition && anyPosition.startsWith("yes")
         ? "Location works but no GPS fix came within 30 s. Go outside with a clear view of the sky; " +
           "it keeps trying every minute."
         : "No fix within 30 s. Turn on Location (high accuracy) in the phone's quick settings, go outside, " +
           "and wait a few minutes for the first fix.");
-    } else if (firstError && firstError.code === 2) {
+    } else if (lastError && lastError.code === 2) {
       advice.push("The phone couldn't get a position. Turn on Location in the phone's quick settings " +
                   "(high accuracy, not battery saving). A laptop without GPS needs internet to locate itself.");
     }
@@ -143,37 +143,7 @@ async function runGpsCheck(firstError) {
   if (advice.length === 0) advice.push("Nothing obviously wrong; it tries again every minute.");
 
   gpsDebug.check.running = false;
-  showGpsBanner(advice[0]);
-  // The terminal running main.py: on a phone the browser console isn't visible
-  fetch("/api/location/debug", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ lines: [...findings.map(([k, v]) => `${k}: ${v}`), ...advice.map((a) => `-> ${a}`)] }),
-  }).catch(() => {});
   if (typeof refreshGpsDebug === "function") refreshGpsDebug();
-}
-
-function showGpsBanner(text) {
-  let banner = document.getElementById("gps-banner");
-  if (!banner) {
-    banner = document.createElement("div");
-    banner.id = "gps-banner";
-    const message = document.createElement("span");
-    const close = document.createElement("button");
-    close.type = "button";
-    close.textContent = "×";
-    close.setAttribute("aria-label", "Dismiss");
-    close.addEventListener("click", hideGpsBanner);
-    banner.append(message, close);
-    document.body.prepend(banner);
-  }
-  banner.firstChild.textContent = `GPS didn't work: ${text} Details in the Debug tab.`;
-  banner.hidden = false;
-}
-
-function hideGpsBanner() {
-  const banner = document.getElementById("gps-banner");
-  if (banner) banner.hidden = true;
 }
 
 function startLocationUpdates() {

@@ -81,7 +81,7 @@ function renderGps() {
   const button = el("button", check && check.running ? "Checking…" : "Run GPS check");
   button.disabled = Boolean(check && check.running);
   button.addEventListener("click", () => {
-    runGpsCheck(null);
+    runGpsCheck(gpsDebug.fixes === 0 ? gpsDebug.last_error : null);  // why the last try failed, if none worked
     refreshGpsDebug();
   });
   section.append(wrap, button);

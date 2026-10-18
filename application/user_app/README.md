@@ -241,9 +241,8 @@ so opening the app from another device over plain `http://<lan-ip>` won't report
 a position; start the server with `--https` for that (see Raspberry Pi above). Updates pause while the tab is hidden or the phone is locked.
 
 If the first try fails, the page checks why (secure page, permission, whether the
-phone has any position at all, device set up) and shows what to do in a banner,
-in the Debug tab's `gps` section (with a **Run GPS check** button), and as
-`[gps]` lines in the terminal running `main.py`.
+phone has any position at all, device set up) and shows what to do in the Debug
+tab's `gps` section, which also has a **Run GPS check** button.
 
 ## Tabs
 
