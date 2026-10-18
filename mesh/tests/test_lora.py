@@ -195,9 +195,14 @@ class RadioSwitchTests(unittest.TestCase):
         self.assertIsNotNone(got())
         return self.ends[0]
 
+    def received_via(self):
+        a, b = self.nodes
+        return b.store.db.list("locales")[0]["received_via"]
+
     def test_close_peers_exchange_over_espnow(self):
         s = self.sync((29.650000, -82.320000), (29.650200, -82.320000))  # ~22 m apart
         self.assertTrue(s.fast)
+        self.assertEqual(self.received_via(), "ESP-NOW")
         self.assertGreater(len(self.espnow_frames), 5)
         run(self.nodes, self.clock, 5)  # past the finished session's linger
         self.assertFalse(any(n.fast_link.radio_on for n in self.nodes), "ESP-NOW is off again afterwards")
@@ -205,6 +210,7 @@ class RadioSwitchTests(unittest.TestCase):
     def test_distant_peers_stay_on_lora(self):
         s = self.sync((29.650000, -82.320000), (29.660000, -82.320000))  # ~1.1 km apart
         self.assertFalse(s.fast)
+        self.assertEqual(self.received_via(), "LoRa")
         self.assertEqual(self.espnow_frames, [])
         a, b = self.nodes
         self.assertEqual(b.store.db.get_location("alice")["latitude"], 29.65, "positions travel over LoRa too")
@@ -249,6 +255,7 @@ class MultipleBoardsTests(unittest.TestCase):
                 self.assertIsNotNone(self.send_locale(h, e, [h, e]))
                 mine = [s for s in self.ends if s.my_id == h.id]
                 self.assertTrue(mine and all(s.fast and s.espnow_only and s.ok for s in mine))
+                self.assertEqual({r["received_via"] for r in h.store.db.list("locales")}, {None, "ESP-NOW"})
 
     def test_without_the_flag_they_never_sync(self):
         h, e = self.heltec("h", 1, fallback=False), self.plain("e", 2)

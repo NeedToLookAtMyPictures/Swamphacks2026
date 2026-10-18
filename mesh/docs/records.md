@@ -30,7 +30,7 @@ records. Within a kind, newer records go first (see [session.md](session.md)).
 ## Fields
 
 `record.data` is the app's row as a dict, with exactly the app's column names,
-minus `time_received` (local bookkeeping that the app never shares either).
+minus `time_received` and `received_via` (local bookkeeping that the app never shares either).
 
 | Kind | Columns |
 |---|---|

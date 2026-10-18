@@ -446,6 +446,7 @@ class Node:
             session.peer_position = peer_pos
         session.fast = use_fast
         session.espnow_only = espnow_only
+        session.radios = (self.link.radio, (self.fast_link or self.link).radio)
         self.session = session
 
     def _on_new_record(self, rec: Record) -> None:

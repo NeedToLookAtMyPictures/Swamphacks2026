@@ -11,7 +11,7 @@ from flask import Flask
 
 import server_sync
 from api import api
-from database import MESSAGE_TTL, SCHEMA, Database, DeviceNotInitialized
+from database import MESSAGE_TTL, SCHEMA, SHARED_TABLES, Database, DeviceNotInitialized
 from global_database import GlobalDatabase
 
 
@@ -165,6 +165,42 @@ class DatabaseTest(unittest.TestCase):
         db.init_device("erin")
         self.assertEqual(db.update_device(server_id="s1")["server_id"], "s1")
 
+    def test_schema_5_gains_received_via(self):
+        path = Path(self.tmp.name) / "v5.db"
+        with sqlite3.connect(path) as conn:
+            conn.executescript(SCHEMA)
+            for table in SHARED_TABLES:
+                conn.execute(f"ALTER TABLE {table} DROP COLUMN received_via")
+            conn.execute("PRAGMA user_version = 5")
+        conn.close()
+        db = Database(path)
+        db.init_device("erin")
+        theirs = self.alice.add_locale("loc-1", "Spring")
+        db.merge(self.alice.export(), via="LoRa")
+        self.assertEqual(db.get("locales", "d-alice", theirs["seq"])["received_via"], "LoRa")
+        mine = db.add_locale("loc-1", "Spring")
+        self.assertIsNone(db.get("locales", mine["origin_id"], mine["seq"])["received_via"])
+
+    def test_received_via_is_kept_locally_only(self):
+        self.alice.add_message("bob", "hi")
+        self.alice.add_locale("loc-1", "Spring")
+        self.alice.set_location(29.65, -82.32)
+        self.bob.merge(self.alice.export(), via="LoRa")
+        self.assertEqual(self.bob.get("messages", "d-alice", 1)["received_via"], "LoRa")
+        self.assertEqual(self.bob.get("locales", "d-alice", 2)["received_via"], "LoRa")
+        self.assertEqual(self.bob.get_location("alice")["received_via"], "LoRa")
+        delivered = self.bob.list("tombstones")[0]  # bob made it himself
+        self.assertIsNone(delivered["received_via"])
+        self.assertIsNone(self.alice.get("messages", "d-alice", 1)["received_via"])
+        self.assertTrue(all("received_via" not in row
+                            for rows in self.bob.export().values() for row in rows))
+
+        self.alice.set_location(29.66, -82.32)  # a newer position arriving another way
+        self.bob.merge(self.alice.export(), via="ESP-NOW")
+        self.assertEqual(self.bob.get_location("alice")["received_via"], "ESP-NOW")
+        with self.assertRaises(ValueError):
+            self.bob.merge({}, via="carrier pigeon")
+
     def test_dead_message_is_not_picked_up(self):
         msg = self.alice.add_message("bob", "hi")
         self.bob.merge(self.alice.export())     # delivered on arrival
@@ -301,6 +337,7 @@ class ApiTest(unittest.TestCase):
                                       sender="bob", receiver="ALICE", content="yo")]}
         self.assertEqual(c.post("/api/sync", json=incoming).json["merged"]["messages"], 1)
         self.assertEqual(c.get("/api/messages/d-bob/1").json["is_dead"], 1)  # delivered on arrival
+        self.assertEqual(c.get("/api/messages/d-bob/1").json["received_via"], "sync API")
         self.assertEqual(c.post("/api/messages/d-bob/1/delivered").status_code, 409)
         self.assertEqual(c.get("/api/messages/d-bob/1").json["is_dead"], 1)
 

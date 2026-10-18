@@ -171,14 +171,16 @@ class AppStore:
 
     # Writing -------------------------------------------------------------------
 
-    def put(self, rec: Record) -> bool:
+    def put(self, rec: Record, via: str | None = None) -> bool:
         """Apply a record from a peer via the app's merge(). True if anything changed.
+
+        via: the radio it came over ("LoRa" or "ESP-NOW"), kept by the app for the user to see.
 
         The app decides everything: whether to keep it, tombstones killing
         messages, and creating a 'delivered' tombstone if the message is ours.
         """
         try:
-            counts = self.db.merge({rec.table: [dict(rec.data)]})
+            counts = self.db.merge({rec.table: [dict(rec.data)]}, via=via)
         except ValueError:
             return False  # the app refused the row as malformed
         self._index = None  # merge may also have created records (a delivered tombstone)

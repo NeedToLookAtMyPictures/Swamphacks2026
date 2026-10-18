@@ -45,6 +45,7 @@ class SimMedium:
     def link(self, name: str, mtu: int = 250) -> SimLink:
         addr = name.encode()
         lk = SimLink(self, addr, mtu)
+        lk.radio = "LoRa" if self.airtime is not None else "ESP-NOW"
         self.links[addr] = lk
         return lk
 
